@@ -55,7 +55,7 @@
         @keyframes shake-err { 10%, 90% { transform: translate3d(-4px, 0, 0); } 20%, 80% { transform: translate3d(8px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-12px, 0, 0); } 40%, 60% { transform: translate3d(12px, 0, 0); } }
 
         .mic-active-pulse { animation: mic-pulse 2s infinite; }
-        @keyframes mic-pulse { 0% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(236, 72, 153, 0); } 100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0); } }
+        @keyframes mic-pulse { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
     </style>
 </head>
 <body>
@@ -65,14 +65,11 @@
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
         const GAME_ID = '音符射擊遊戲';
-        // 👇 這邊記得維持你原本發布的網址喔！
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7qB2N3skJjYa8qsi9ewOfTu-7UjfUzGx9h1O6drZqW84td_hyAlKpHw_TDldViIIEYg/exec';
         
-        // 評分設定
         const PENALTY_PER_SECOND = 3; 
 
         // --- 麥克風音高偵測核心演算法 (Autocorrelation) ---
-        const MIN_SAMPLES = 0;
         function autoCorrelate(buf, sampleRate) {
             let SIZE = buf.length;
             let rms = 0;
@@ -81,7 +78,8 @@
                 rms += val * val;
             }
             rms = Math.sqrt(rms / SIZE);
-            if (rms < 0.01) return -1; // 音量太小，當作沒聲音
+            // 放寬音量門檻，讓長笛或遠距離鋼琴也抓得到
+            if (rms < 0.005) return -1; 
 
             let r1 = 0, r2 = SIZE - 1, thres = 0.2;
             for (let i = 0; i < SIZE / 2; i++)
@@ -119,7 +117,6 @@
             const midiNote = Math.round(noteNum) + 69;
             const octave = Math.floor(midiNote / 12) - 1;
             const noteName = noteStrings[midiNote % 12];
-            // 由於五線譜遊戲裡我們不處理升降記號，遇到升降記號先過濾掉，以避免誤判
             if (noteName.includes('#')) return null;
             return `${noteName}${octave}`;
         }
@@ -405,11 +402,11 @@
 
         // --- 麥克風相關 State 與 Refs ---
         const [isMicActive, setIsMicActive] = useState(false);
-        const [currentDetectedNote, setCurrentDetectedNote] = useState(null); // 用於畫面顯示目前抓到的音
+        const [currentDetectedNote, setCurrentDetectedNote] = useState(null); 
         const micStreamRef = useRef(null);
         const analyserRef = useRef(null);
         const pitchRafRef = useRef(null);
-        const consecutiveNoteRef = useRef({ note: null, count: 0 }); // 用來防呆，確保音高穩定才開火
+        const consecutiveNoteRef = useRef({ note: null, count: 0 }); 
         const audioCtxRef = useRef(null);
 
         const timerRef = useRef(null);
@@ -441,23 +438,36 @@
             };
         }, [isMicActive, stopMic]);
 
+        // 取得 AudioContext (確保相容 Safari)
+        const getAudioContext = () => {
+            if (!audioCtxRef.current) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtxRef.current = new AudioContext();
+            }
+            return audioCtxRef.current;
+        };
+
         // 啟動麥克風
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
                 return;
             }
+            
+            // 關鍵修復 1：在 await 之前（使用者點擊的當下）立刻喚醒 AudioContext，這是破解 Safari 靜音的關鍵！
+            const audioCtx = getAudioContext();
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+
             try {
-                // 關閉回音消除與降噪，以利樂器收音
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } 
-                });
+                // 簡化設定，提高 Safari 舊版的相容性
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 micStreamRef.current = stream;
                 
-                const audioCtx = getAudioContext();
                 const source = audioCtx.createMediaStreamSource(stream);
                 const analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048; // 解析度
+                analyser.fftSize = 2048; 
                 source.connect(analyser);
                 analyserRef.current = analyser;
                 
@@ -476,7 +486,17 @@
             const loop = () => {
                 if (!micStreamRef.current) return;
                 
-                analyser.getFloatTimeDomainData(buffer);
+                // 關鍵修復 2：相容較舊的 iOS Safari (缺乏 getFloatTimeDomainData 時自動降級處理)
+                if (analyser.getFloatTimeDomainData) {
+                    analyser.getFloatTimeDomainData(buffer);
+                } else {
+                    const dataArray = new Uint8Array(analyser.fftSize);
+                    analyser.getByteTimeDomainData(dataArray);
+                    for (let i = 0; i < analyser.fftSize; i++) {
+                        buffer[i] = (dataArray[i] / 128.0) - 1.0;
+                    }
+                }
+
                 const pitchInHz = autoCorrelate(buffer, sampleRate);
                 
                 if (pitchInHz !== -1) {
@@ -484,7 +504,7 @@
                     if (note) {
                         setCurrentDetectedNote(note);
                         
-                        // 穩定度判定：必須連續偵測到同一個音高 4 次 (大約 60 毫秒) 才算數
+                        // 穩定度判定：連續偵測到 2 次即可開火，反應更靈敏
                         if (consecutiveNoteRef.current.note === note) {
                             consecutiveNoteRef.current.count += 1;
                         } else {
@@ -492,9 +512,7 @@
                             consecutiveNoteRef.current.count = 1;
                         }
 
-                        // 如果穩定偵測，且在遊戲中，觸發開火邏輯
-                        if (consecutiveNoteRef.current.count === 4) {
-                            // 使用自訂事件或直接調用，但因為閉包關係，我們把檢驗放在 handleNoteInput
+                        if (consecutiveNoteRef.current.count === 2) {
                             window.dispatchEvent(new CustomEvent('micNoteDetected', { detail: note }));
                         }
                     } else {
@@ -518,7 +536,7 @@
                 setIsRefreshing(true);
             }
             try {
-                const res = await fetch(`${SCRIPT_URL}?api=true&gameId=${encodeURIComponent(GAME_ID)}&t=${Date.now()}`);
+                const res = await fetch(`${SCRIPT_URL}?gameId=${encodeURIComponent(GAME_ID)}&t=${Date.now()}`);
                 const data = await res.json();
                 
                 setLeaderboardAllTime(data.leaderboard || []);
@@ -542,17 +560,13 @@
             fetchLeaderboardData(true);
         }, []);
 
-        // 動態計算這位玩家該做什麼題目
         const currentUserAssignment = useMemo(() => {
-            // 優先檢查：輸入的名字是否在「差異化教學」名單中？
             if (differentiatedAssignments[loginState.name] && differentiatedAssignments[loginState.name].length > 0) {
                 return differentiatedAssignments[loginState.name];
             }
-            // 沒在名單上，就套用全域題庫 (如果全域沒設定，就是空陣列 = 自由模式)
             return assignedNotesData || [];
         }, [loginState.name, differentiatedAssignments, assignedNotesData]);
 
-        // 更新狀態判定邏輯
         const isAssignedModeActive = currentUserAssignment.length > 0;
 
         useEffect(() => {
@@ -656,12 +670,6 @@
                 alert("傳送成績失敗，請檢查網路連線。");
             }
             setIsSubmitting(false);
-        };
-
-        const getAudioContext = () => {
-            if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
-            return audioCtxRef.current;
         };
 
         const handleLevelChange = (level) => {
@@ -782,7 +790,6 @@
                 const newLaser = { id: Date.now(), startX, startY, targetX, targetY };
                 setLasers(prev => [...prev, newLaser]);
                 
-                // 實體按鍵發聲，如果是麥克風輸入就不另外發聲干擾
                 if (!isMicActive) {
                     playSound(getAudioContext(), 'laser');
                 }
@@ -805,14 +812,12 @@
                     setStats(s => ({ ...s, correct: s.correct + 1 }));
                     
                     setGameScore(s => {
-                        // 如果是麥克風，combo計算方式一樣，這能鼓勵穩定吹奏
                         const newCombo = combo + 1;
                         return s + 100 + ((newCombo - 1) * 50);
                     });
 
                     fireLaser(currentTarget.uid, inputPitch); 
                     
-                    // 如果不是麥克風模式，給予正確音效回饋
                     if (source !== 'mic') {
                         playSound(getAudioContext(), 'note', currentTarget.freq);
                     }
@@ -826,7 +831,6 @@
                             if (prev + 1 < gameTargets.length) {
                                 return prev + 1;
                             } else {
-                                // 過關結算
                                 const end = Date.now();
                                 const finalSecondsFloat = (end - startTimeRef.current) / 1000;
                                 const finalSeconds = finalSecondsFloat.toFixed(2); 
@@ -844,7 +848,6 @@
 
                 } else {
                     // 答錯邏輯
-                    // 為了避免麥克風收到些微泛音雜訊就瘋狂扣分，麥克風模式對於「答錯」採取寬容策略：不扣分不中斷連擊，除非是用手點錯
                     if (source === 'keyboard') {
                         setCombo(0);
                         setStats(s => ({ ...s, wrong: s.wrong + 1 }));
@@ -1093,16 +1096,16 @@
                         </h1>
                     </div>
 
-                    {/* 麥克風開關 */}
+                    {/* 大廳麥克風開關 (視覺大升級) */}
                     <div className="absolute right-2 top-14 md:right-4 md:top-16 z-50 flex items-center gap-2">
                         {currentDetectedNote && isMicActive && (
-                            <span className="text-pink-400 font-mono font-bold bg-pink-900/30 px-2 py-1 rounded-lg text-sm border border-pink-500/30">
+                            <span className="text-emerald-400 font-mono font-bold bg-emerald-900/30 px-2 py-1 rounded-lg text-sm border border-emerald-500/50">
                                 🎵 {currentDetectedNote}
                             </span>
                         )}
-                        <button onClick={toggleMic} className={`px-3 py-1.5 rounded-lg md:rounded-xl font-bold text-xs md:text-sm font-zh border flex items-center gap-1.5 transition-all shadow-md ${isMicActive ? 'bg-pink-600 text-white border-pink-500 mic-active-pulse' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-white'}`}>
+                        <button onClick={toggleMic} className={`px-3 py-1.5 rounded-lg md:rounded-xl font-bold text-xs md:text-sm font-zh border flex items-center gap-1.5 transition-all shadow-md ${isMicActive ? 'bg-emerald-500 text-white border-emerald-400 mic-active-pulse' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-white'}`}>
                             {isMicActive ? <Icons.Mic className="w-4 h-4"/> : <Icons.MicOff className="w-4 h-4"/>}
-                            <span className="hidden min-[400px]:inline">{isMicActive ? '樂器偵測中' : '開啟樂器偵測'}</span>
+                            <span className="hidden min-[400px]:inline">{isMicActive ? '麥克風：開啟' : '麥克風：關閉'}</span>
                         </button>
                     </div>
 
@@ -1201,12 +1204,14 @@
                             </div>
                         </div>
 
+                        {/* 遊戲中畫面：加入麥克風按鈕與顯示 */}
                         <div className="flex gap-1.5 md:gap-3">
-                            {currentDetectedNote && isMicActive && (
-                                <div className="hidden min-[500px]:flex items-center px-2 md:px-3 py-1.5 md:py-2 bg-pink-900/50 text-pink-300 border border-pink-500/50 rounded-lg md:rounded-xl shadow-lg font-bold">
-                                    🎤 音高: {currentDetectedNote}
-                                </div>
-                            )}
+                            
+                            {/* 遊戲中專用麥克風按鈕 */}
+                            <button onClick={toggleMic} className={`px-2.5 md:px-3 py-1.5 md:py-2 rounded-lg md:rounded-xl backdrop-blur-md border flex items-center gap-1 md:gap-1.5 font-zh transition-all shadow-lg active:scale-95 ${isMicActive ? 'bg-emerald-500 border-emerald-400 text-white mic-active-pulse' : 'bg-slate-800/90 border-slate-500 text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
+                                {isMicActive ? <Icons.Mic className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <Icons.MicOff className="w-3.5 h-3.5 md:w-4 md:h-4" />}
+                                <span className="hidden min-[400px]:inline">{isMicActive ? '開啟中' : '已關閉'}</span>
+                            </button>
 
                             <button onClick={() => setShowKeyboardHints(!showKeyboardHints)} className={`px-2.5 md:px-3 py-1.5 md:py-2 text-white rounded-lg md:rounded-xl backdrop-blur-md border flex items-center gap-1 md:gap-1.5 font-zh transition-all shadow-lg active:scale-95 ${!showKeyboardHints ? 'bg-fuchsia-600/90 border-fuchsia-400' : 'bg-slate-800/90 border-slate-500 hover:bg-slate-700'}`}>
                                 {showKeyboardHints ? <Icons.EyeOff className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <Icons.Eye className="w-3.5 h-3.5 md:w-4 md:h-4" />}
@@ -1232,7 +1237,7 @@
                                         className={`w-full h-full border flex flex-col justify-end items-center pb-2 md:pb-4 transition-all z-10 relative overflow-hidden
                                             ${index === 0 ? 'rounded-bl-lg' : ''} 
                                             ${index === dynamicKeys.length - 1 ? 'rounded-br-lg' : ''}
-                                            ${isMicHighlight ? 'bg-pink-100 border-pink-400 shadow-[inset_0_-10px_20px_rgba(236,72,153,0.3)] translate-y-1' : wrongShake ? 'bg-slate-300 text-slate-500 border-slate-300' : 'bg-white border-slate-300 text-slate-800 hover:bg-fuchsia-50 active:bg-slate-200 active:translate-y-1'}
+                                            ${isMicHighlight ? 'bg-emerald-100 border-emerald-400 shadow-[inset_0_-10px_20px_rgba(16,185,129,0.3)] translate-y-1' : wrongShake ? 'bg-slate-300 text-slate-500 border-slate-300' : 'bg-white border-slate-300 text-slate-800 hover:bg-fuchsia-50 active:bg-slate-200 active:translate-y-1'}
                                         `}
                                         style={!isMicHighlight ? { boxShadow: 'inset 0 -6px 10px rgba(0,0,0,0.15)' } : {}}
                                         disabled={currentNoteObj?.isExploding}
@@ -1246,8 +1251,8 @@
                                             )}
                                             {showKeyboardHints && (
                                                 <>
-                                                    <span className={`text-sm sm:text-xl md:text-3xl lg:text-4xl font-bold leading-none shrink-0 ${isMicHighlight ? 'text-pink-600' : ''}`}>{k.name}</span>
-                                                    <span className={`text-[8px] md:text-xs font-zh mt-1 hidden sm:block shrink-0 ${isMicHighlight ? 'text-pink-500' : 'text-slate-500'}`}>{SOLFEGE_MAP[k.name]}</span>
+                                                    <span className={`text-sm sm:text-xl md:text-3xl lg:text-4xl font-bold leading-none shrink-0 ${isMicHighlight ? 'text-emerald-600' : ''}`}>{k.name}</span>
+                                                    <span className={`text-[8px] md:text-xs font-zh mt-1 hidden sm:block shrink-0 ${isMicHighlight ? 'text-emerald-500' : 'text-slate-500'}`}>{SOLFEGE_MAP[k.name]}</span>
                                                 </>
                                             )}
                                         </div>
