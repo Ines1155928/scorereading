@@ -70,7 +70,7 @@
         
         const PENALTY_PER_SECOND = 3; 
 
-        // 🌟 直接移植音準大冒險的「高穩定度」音高分析演算法
+        // 🌟 移植自音準大冒險的「高穩定度」音高分析演算法 (含防崩潰保護)
         function autoCorrelate(buf, sampleRate) {
             let SIZE = buf.length;
             let r1 = 0, r2 = SIZE - 1, thres = 0.2;
@@ -87,7 +87,7 @@
             let maxval = -1, maxpos = -1;
             for (let i = d; i < SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
             
-            let clarity = maxval / c[0];
+            let clarity = maxval / (c[0] || 1); // 防止除以零
             if (clarity < 0.5) { return -1; }
 
             let T0 = maxpos;
@@ -97,18 +97,25 @@
                 let b = (y3 - y1) / 2;
                 if (a !== 0) T0 = T0 - b / (2 * a);
             }
+            
+            if (T0 === 0) return -1;
             return sampleRate / T0;
         }
 
+        // 🌟 防崩潰保護：過濾無效頻率
         function noteFromPitch(frequency) {
+            if (!frequency || frequency <= 0 || frequency === Infinity || Number.isNaN(frequency)) return null;
             const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
             const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
             const midiNote = Math.round(noteNum) + 69;
-            if (midiNote < 0 || midiNote > 127) return null;
+            
+            if (Number.isNaN(midiNote) || midiNote < 0 || midiNote > 127) return null;
+            
             const octave = Math.floor(midiNote / 12) - 1;
             const noteName = noteStrings[midiNote % 12];
+            
             // 過濾掉帶有升降記號的音
-            if (noteName.includes('#')) return null;
+            if (!noteName || noteName.includes('#')) return null;
             return `${noteName}${octave}`;
         }
 
@@ -391,7 +398,6 @@
         const [isSubmitting, setIsSubmitting] = useState(false);
         const [isSubmitted, setIsSubmitted] = useState(false);
 
-        // --- 麥克風相關 State 與 Refs ---
         const [isMicActive, setIsMicActive] = useState(false);
         const [currentDetectedNote, setCurrentDetectedNote] = useState(null); 
         
@@ -401,13 +407,21 @@
         const audioCtxRef = useRef(null);
         const volumeBarRef = useRef(null); 
         
-        // 🌟 移植自音準大冒險：連續幀數計數器
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
 
         const timerRef = useRef(null);
         const startTimeRef = useRef(0);
         const targetRefs = useRef({}); 
+
+        // 🌟 確保所有需要 AudioContext 的地方都不會出錯
+        const getAudioContext = useCallback(() => {
+            if (!audioCtxRef.current) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtxRef.current = new AudioContext();
+            }
+            return audioCtxRef.current;
+        }, []);
 
         const stopMic = useCallback(() => {
             if (pitchRafRef.current) cancelAnimationFrame(pitchRafRef.current);
@@ -435,41 +449,30 @@
             };
         }, [isMicActive, stopMic]);
 
-        // 🌟 核心修復 1：同步建立並喚醒 AudioContext，配合 GainNode 強行放大聲音 [cite: 228, 229, 230, 278, 279, 280, 281]
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
                 return;
             }
             
-            // 必須在使用者點擊的同一個執行緒內同步初始化與喚醒！
-            let audioCtx = audioCtxRef.current;
-            if (!audioCtx) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                audioCtx = new AudioContext();
-                audioCtxRef.current = audioCtx;
-            }
+            const audioCtx = getAudioContext();
             if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
+                await audioCtx.resume();
             }
 
             try {
-                // 取消所有降噪，確保樂器原音進入 [cite: 279]
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } 
                 });
                 micStreamRef.current = stream;
                 
                 const source = audioCtx.createMediaStreamSource(stream);
-                
-                // 加裝放大器節點，靈敏度放大 8 倍 [cite: 280]
                 const micGainNode = audioCtx.createGain();
                 micGainNode.gain.value = 8.0; 
                 
                 const analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048; [cite: 229]
+                analyser.fftSize = 2048;
                 
-                // 最純粹的連線方式：麥克風 -> 放大器 -> 分析器 [cite: 280, 281]
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
                 
@@ -488,9 +491,16 @@
             const loop = () => {
                 if (!micStreamRef.current) return;
                 
-                analyser.getFloatTimeDomainData(buffer);
+                if (analyser.getFloatTimeDomainData) {
+                    analyser.getFloatTimeDomainData(buffer);
+                } else {
+                    const dataArray = new Uint8Array(analyser.fftSize);
+                    analyser.getByteTimeDomainData(dataArray);
+                    for (let i = 0; i < analyser.fftSize; i++) {
+                        buffer[i] = (dataArray[i] / 128.0) - 1.0;
+                    }
+                }
 
-                // 🌟 移植自音準大冒險的 RMS 音量演算法 [cite: 287, 288, 289]
                 let rms = 0;
                 for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
                 rms = Math.sqrt(rms / buffer.length);
@@ -499,16 +509,14 @@
                     volumeBarRef.current.style.width = Math.min(100, rms * 100 * 5) + '%';
                 }
                 
-                // 音量門檻設定為非常敏銳的 0.0015 [cite: 290]
                 if (rms > 0.0015) {
-                    const currentFreq = autoCorrelate(buffer, sampleRate); [cite: 291]
+                    const currentFreq = autoCorrelate(buffer, sampleRate);
                     
                     if (currentFreq !== -1) {
                         const note = noteFromPitch(currentFreq);
                         if (note) {
                             setCurrentDetectedNote(note);
                             
-                            // 🌟 核心修復 2：嚴謹的幀數累積判定 (Frame Matching)
                             if (lastDetectedNoteRef.current === note) {
                                 matchFramesRef.current++;
                             } else {
@@ -516,7 +524,6 @@
                                 matchFramesRef.current = 1;
                             }
                             
-                            // 連續抓到同一個音 6 次 (約 100 毫秒) 才確認開火，完美避開泛音干擾
                             if (matchFramesRef.current === 6) {
                                 window.dispatchEvent(new CustomEvent('micNoteDetected', { detail: note }));
                             }
@@ -816,7 +823,6 @@
 
                 const targetPitch = currentTarget.id.split('_')[1]; 
                 
-                // 💡 八度音寬容：麥克風收音只比對純音名
                 const targetBaseNote = targetPitch.replace(/[0-9]/g, ''); 
                 const inputBaseNote = inputPitch.replace(/[0-9]/g, '');   
 
@@ -873,7 +879,7 @@
                     return prevTargets;
                 }
             });
-        }, [currentTargetIndex, gameTargets.length, combo, isMicActive]);
+        }, [currentTargetIndex, gameTargets.length, combo, isMicActive, getAudioContext]);
 
         const handleNoteInput = (inputPitch) => {
             if (!isGameMode) return;
@@ -1223,6 +1229,7 @@
                             </div>
                         </div>
 
+                        {/* 遊戲中畫面麥克風按鈕 */}
                         <div className="flex gap-1.5 md:gap-3">
                             {currentDetectedNote && isMicActive && (
                                 <div className="hidden min-[500px]:flex items-center px-2 md:px-3 py-1.5 md:py-2 bg-emerald-900/50 text-emerald-300 border border-emerald-500/50 rounded-lg md:rounded-xl shadow-lg font-bold">
@@ -1233,6 +1240,7 @@
                             <button onClick={toggleMic} className={`relative px-2.5 md:px-3 py-1.5 md:py-2 rounded-lg md:rounded-xl backdrop-blur-md border flex items-center gap-1 md:gap-1.5 font-zh transition-all shadow-lg active:scale-95 ${isMicActive ? 'bg-emerald-500 border-emerald-400 text-white mic-active-pulse' : 'bg-slate-800/90 border-slate-500 text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
                                 {isMicActive ? <Icons.Mic className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <Icons.MicOff className="w-3.5 h-3.5 md:w-4 md:h-4" />}
                                 <span className="hidden min-[400px]:inline">{isMicActive ? '開啟中' : '已關閉'}</span>
+                                {/* 音量指示條 */}
                                 {isMicActive && (
                                     <div className="absolute bottom-0 left-0 h-1 bg-emerald-200 rounded-b-xl transition-all duration-75" ref={volumeBarRef} style={{ width: '0%' }}></div>
                                 )}
