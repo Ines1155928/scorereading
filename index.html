@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 終極穩定版</title>
+    <title>五線譜音高認知射擊遊戲 - 絕對音準版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -398,6 +398,8 @@
         const startTimeRef = useRef(0);
         const targetRefs = useRef({}); 
         
+        const wasMicActiveRef = useRef(false);
+
         // 取得或初始化 AudioContext
         const getAudioContext = useCallback(() => {
             if (!audioCtxRef.current) {
@@ -407,7 +409,6 @@
             return audioCtxRef.current;
         }, []);
 
-        // 【極致穩定版修正】：加入全域事件監聽，只要玩家點擊畫面，立刻修復休眠的音效引擎
         useEffect(() => {
             const unlockAudio = () => {
                 const ctx = audioCtxRef.current;
@@ -432,7 +433,6 @@
             setIsMicActive(false);
             setCurrentDetectedNote(null);
             
-            // 安全地重置兩個畫面的音量條
             const lBar = document.getElementById('lobby-volume-bar');
             const gBar = document.getElementById('game-volume-bar');
             if (lBar) lBar.style.width = '0%';
@@ -442,7 +442,6 @@
             lastDetectedNoteRef.current = null;
         }, []);
 
-        // 【極致穩定版修正】：完全移植「音準大冒險」的寫法，絕不亂接 destination 避免被蘋果切斷
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
@@ -455,7 +454,6 @@
             }
 
             try {
-                // 完全比照音準大冒險的設定參數
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { echoCancellation: false, noiseSuppression: false } 
                 });
@@ -473,7 +471,6 @@
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
                 
-                // 完全比照音準大冒險的路由：不接喇叭，只到分析器為止
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
                 
@@ -486,19 +483,46 @@
             }
         };
 
+        useEffect(() => {
+            const handleVisibilityChange = async () => {
+                if (document.hidden) {
+                    if (isMicActive) {
+                        wasMicActiveRef.current = true;
+                        stopMic();
+                    }
+                } else {
+                    const ctx = audioCtxRef.current;
+                    if (ctx && ctx.state === 'suspended') {
+                        try { await ctx.resume(); } catch(e) {}
+                    }
+                    if (wasMicActiveRef.current) {
+                        wasMicActiveRef.current = false;
+                        toggleMic();
+                    }
+                }
+            };
+
+            window.addEventListener('visibilitychange', handleVisibilityChange);
+            window.addEventListener('pagehide', stopMic);
+            
+            return () => {
+                window.removeEventListener('visibilitychange', handleVisibilityChange);
+                window.removeEventListener('pagehide', stopMic);
+                stopMic();
+            };
+        }, [isMicActive, stopMic]); 
+
         const detectPitchLoop = (analyser, sampleRate) => {
             const buffer = new Float32Array(analyser.fftSize);
             const loop = () => {
                 if (!micStreamRef.current) return;
                 
-                // 完全比照音準大冒險的抓取方式
                 analyser.getFloatTimeDomainData(buffer);
 
                 let rms = 0;
                 for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
                 rms = Math.sqrt(rms / buffer.length);
                 
-                // 【極致穩定版修正】：改用 DOM ID 尋找音量條，避免 React 切換畫面時發生「找不到組件」的靈異現象
                 const lBar = document.getElementById('lobby-volume-bar');
                 const gBar = document.getElementById('game-volume-bar');
                 const widthStr = Math.min(100, rms * 100 * 5) + '%';
@@ -807,10 +831,9 @@
                 if (!currentTarget || currentTarget.isExploding) return prevTargets;
 
                 const targetPitch = currentTarget.id.split('_')[1]; 
-                const targetBaseNote = targetPitch.replace(/[0-9]/g, ''); 
-                const inputBaseNote = inputPitch.replace(/[0-9]/g, '');   
 
-                const isMatch = (source === 'mic') ? (targetBaseNote === inputBaseNote) : (inputPitch === targetPitch);
+                // 【嚴格音高修正】：直接比對包含八度音的完整字串 (例如 'C4' === 'C4')
+                const isMatch = (inputPitch === targetPitch);
 
                 if (isMatch) {
                     setCombo(c => { const nc = c + 1; setMaxCombo(mc => Math.max(mc, nc)); return nc; });
@@ -1245,7 +1268,7 @@
                         <div className="w-full max-w-6xl mx-auto h-full flex relative shadow-2xl rounded-b-xl">
                             <div className="absolute top-0 left-0 right-0 h-3 md:h-4 bg-red-800 rounded-t-sm z-0"></div>
                             {dynamicKeys.map((k, index) => {
-                                const isMicHighlight = isMicActive && currentDetectedNote && currentDetectedNote.replace(/[0-9]/g, '') === k.name;
+                                const isMicHighlight = isMicActive && currentDetectedNote && currentDetectedNote === k.pitch;
                                 return (
                                 <div key={k.pitch} className="relative flex pt-2 md:pt-3 flex-1 min-w-0">
                                     <button
@@ -1263,7 +1286,7 @@
                                             {k.pitch === 'C4' && (
                                                 <div className="flex flex-col items-center mb-1.5">
                                                     <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-red-500 rounded-full shadow-red-500/50"></div>
-                                                    <span className="text-[8px] md:text-[11px] font-bold text-red-600 bg-red-100/90 px-0.5 md:px-1.5 rounded mt-0.5 font-zh hidden min-[500px]:block shrink-0">中央 Do</span>
+                                                    <span className="text-[8px] md:text-[11px] font-bold text-red-600 bg-red-100/90 px-0.5 md:px-1.5 rounded mt-0.5 font-zh shrink-0 block">中央 Do</span>
                                                 </div>
                                             )}
                                             {showKeyboardHints && (
