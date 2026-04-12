@@ -1,51 +1,542 @@
-const toggleMic = async () => {
-            if (isMicActive) {
-                stopMic();
-                return;
-            }
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>五線譜音高認知射擊遊戲 - 終極修復版</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Noto+Sans+TC:wght@400;700&display=swap');
+        html, body { 
+            position: fixed; 
+            inset: 0;
+            width: 100%; 
+            height: 100%; 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background: #020617; 
+            touch-action: none;
+        }
+        #root { 
+            position: absolute;
+            inset: 0; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        
+        .font-kids { font-family: 'Fredoka', sans-serif; }
+        .font-zh { font-family: 'Noto Sans TC', sans-serif; }
+        .music-space-bg { background: radial-gradient(circle at center, #2e1065 0%, #172554 50%, #020617 100%); }
+        
+        @keyframes twinkle { 0%, 100% { opacity: 0.2; transform: scale(0.8); } 50% { opacity: 0.8; transform: scale(1.2); } }
+        .animate-twinkle { animation: twinkle 3s ease-in-out infinite; }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+        .animate-float { animation: float 4s ease-in-out infinite; }
+        @keyframes pop-in { 0% { transform: scale(0); opacity: 0; } 80% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+        .animate-pop { animation: pop-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes destroy { 0% { transform: scale(1) translateY(0); filter: hue-rotate(0deg); opacity: 1; } 50% { transform: scale(1.4) translateY(-10px); filter: hue-rotate(90deg) brightness(2); opacity: 0.8; } 100% { transform: scale(0) translateY(30px); opacity: 0; } }
+        @keyframes laser-shot { 0% { width: 0; opacity: 1; } 50% { width: 100%; opacity: 1; } 100% { width: 100%; opacity: 0; } }
+        @keyframes pop-bounce { 0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; } 60% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+        .animate-combo { animation: pop-bounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .shake-error { animation: shake-err 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+        @keyframes shake-err { 10%, 90% { transform: translate3d(-4px, 0, 0); } 20%, 80% { transform: translate3d(8px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-12px, 0, 0); } 40%, 60% { transform: translate3d(12px, 0, 0); } }
+
+        .mic-active-pulse { animation: mic-pulse 2s infinite; }
+        @keyframes mic-pulse { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo, useCallback } = React;
+        const GAME_ID = '音符射擊遊戲';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7qB2N3skJjYa8qsi9ewOfTu-7UjfUzGx9h1O6drZqW84td_hyAlKpHw_TDldViIIEYg/exec';
+        const PENALTY_PER_SECOND = 3; 
+
+        function autoCorrelate(buf, sampleRate) {
+            let SIZE = buf.length;
+            let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+            for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+            for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+
+            buf = buf.slice(r1, r2);
+            SIZE = buf.length;
+            let c = new Array(SIZE).fill(0);
+            for (let i = 0; i < SIZE; i++) for (let j = 0; j < SIZE - i; j++) c[i] = c[i] + buf[j] * buf[j + i];
+            let d = 0; while (c[d] > c[d + 1]) d++;
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
             
-            // 確保在使用者點擊的瞬間喚醒 AudioContext
-            let audioCtx = getAudioContext();
-            if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
+            let clarity = maxval / (c[0] || 1);
+            if (clarity < 0.5) { return -1; }
+
+            let T0 = maxpos;
+            if (maxpos > 0 && maxpos < SIZE - 1) {
+                let y1 = c[maxpos - 1], y2 = c[maxpos], y3 = c[maxpos + 1];
+                let a = (y1 + y3 - 2 * y2) / 2;
+                let b = (y3 - y1) / 2;
+                if (a !== 0) T0 = T0 - b / (2 * a);
             }
+            if (T0 === 0) return -1;
+            return sampleRate / T0;
+        }
 
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } 
-                });
-                
-                stream.getTracks()[0].onended = () => {
-                    console.log("麥克風連線被系統中斷");
-                    stopMic();
-                };
+        function noteFromPitch(frequency) {
+            if (!frequency || frequency <= 0 || frequency === Infinity || Number.isNaN(frequency)) return null;
+            const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+            const midiNote = Math.round(noteNum) + 69;
+            if (Number.isNaN(midiNote) || midiNote < 0 || midiNote > 127) return null;
+            const octave = Math.floor(midiNote / 12) - 1;
+            const noteName = noteStrings[midiNote % 12];
+            if (!noteName || noteName.includes('#')) return null;
+            return `${noteName}${octave}`;
+        }
 
-                micStreamRef.current = stream;
-                const source = audioCtx.createMediaStreamSource(stream);
-                
-                const micGainNode = audioCtx.createGain();
-                micGainNode.gain.value = 5.0; 
-                
-                const analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048;
-                
-                source.connect(micGainNode);
-                micGainNode.connect(analyser);
-
-                // --- 🍏 針對 iOS Safari 的終極修正 ---
-                // Safari 如果發現音訊沒有連到「輸出」，就會偷懶不抓麥克風資料
-                // 解法：建一個音量為 0 的節點連到喇叭，強迫 Safari 啟動音訊流，且不會產生回音！
-                const safariHackGain = audioCtx.createGain();
-                safariHackGain.gain.value = 0;
-                analyser.connect(safariHackGain);
-                safariHackGain.connect(audioCtx.destination);
-                // ------------------------------------
-                
-                analyserRef.current = analyser;
-                setIsMicActive(true);
-                detectPitchLoop(analyser, audioCtx.sampleRate);
-            } catch (err) {
-                console.error("Mic error:", err);
-                alert("無法存取麥克風，請確認您的裝置與瀏覽器設定已允許使用麥克風！");
-            }
+        const Icons = {
+            Music: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>,
+            X: ({ className, strokeWidth=2 }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+            RotateCcw: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>,
+            Gamepad2: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><path d="M20 6H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2z"/></svg>,
+            Timer: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="15" y2="11"/><circle cx="12" cy="14" r="8"/></svg>,
+            Zap: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+            Sparkles: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>,
+            CheckCircle2: ({ className, strokeWidth=2 }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>,
+            Trash2: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>,
+            ArrowLeft: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>,
+            Eye: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>,
+            EyeOff: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>,
+            Trophy: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 1.1-.9 2-2 2H6"/><path d="M14 14.66V17c0 1.1.9 2 2 2h2"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>,
+            LogOut: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+            Flame: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>,
+            Mic: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>,
+            MicOff: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
         };
+
+        const NOTE_COLORS = {
+            'C': { bg: 'bg-gradient-to-br from-red-900/50 to-red-950/50', border: 'border-red-400', shadow: 'shadow-[0_0_15px_rgba(248,113,113,0.4)]', labelBg: 'bg-red-500', hex: '#f87171' },
+            'D': { bg: 'bg-gradient-to-br from-orange-900/50 to-orange-950/50', border: 'border-orange-400', shadow: 'shadow-[0_0_15px_rgba(251,146,60,0.4)]', labelBg: 'bg-orange-500', hex: '#fb923c' },
+            'E': { bg: 'bg-gradient-to-br from-yellow-900/50 to-yellow-950/50', border: 'border-yellow-400', shadow: 'shadow-[0_0_15px_rgba(250,204,21,0.4)]', labelBg: 'bg-yellow-500', hex: '#facc15' },
+            'F': { bg: 'bg-gradient-to-br from-emerald-900/50 to-emerald-950/50', border: 'border-emerald-400', shadow: 'shadow-[0_0_15px_rgba(52,211,153,0.4)]', labelBg: 'bg-emerald-500', hex: '#34d399' },
+            'G': { bg: 'bg-gradient-to-br from-cyan-900/50 to-cyan-950/50', border: 'border-cyan-400', shadow: 'shadow-[0_0_15px_rgba(34,211,238,0.4)]', labelBg: 'bg-cyan-500', hex: '#22d3ee' },
+            'A': { bg: 'bg-gradient-to-br from-blue-900/50 to-blue-950/50', border: 'border-blue-400', shadow: 'shadow-[0_0_15px_rgba(96,165,250,0.4)]', labelBg: 'bg-blue-500', hex: '#60a5fa' },
+            'B': { bg: 'bg-gradient-to-br from-fuchsia-900/50 to-fuchsia-950/50', border: 'border-fuchsia-400', shadow: 'shadow-[0_0_15px_rgba(232,121,249,0.4)]', labelBg: 'bg-fuchsia-500', hex: '#e879f9' }
+        };
+
+        const playSound = (ctx, type, freq = 440) => {
+            if (!ctx) return;
+            const t = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            if (type === 'laser') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(880, t);
+                osc.frequency.exponentialRampToValueAtTime(110, t + 0.15);
+                gain.gain.setValueAtTime(0.1, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+                osc.start(t);
+                osc.stop(t + 0.15);
+            } else if (type === 'explosion') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(100, t);
+                osc.frequency.exponentialRampToValueAtTime(30, t + 0.1);
+                gain.gain.setValueAtTime(0.15, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+                osc.start(t);
+                osc.stop(t + 0.1);
+            } else if (type === 'note') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, t);
+                gain.gain.setValueAtTime(0.4, t);
+                gain.gain.exponentialRampToValueAtTime(0.001, t + 1.2); 
+                osc.start(t);
+                osc.stop(t + 1.2);
+            } else if (type === 'error') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, t);
+                gain.gain.setValueAtTime(0.3, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+                osc.start(t);
+                osc.stop(t + 0.25);
+            }
+            setTimeout(() => { osc.disconnect(); gain.disconnect(); }, 1500);
+        };
+
+        const NOTE_DATABASE = {
+            treble_mid: [
+                { id: 't_C4', name: 'C', solfege: 'Do', freq: 261.63, y: 120, clef: 'treble' }, 
+                { id: 't_D4', name: 'D', solfege: 'Re', freq: 293.66, y: 110, clef: 'treble' }, 
+                { id: 't_E4', name: 'E', solfege: 'Mi', freq: 329.63, y: 100, clef: 'treble' }, 
+                { id: 't_F4', name: 'F', solfege: 'Fa', freq: 349.23, y: 90,  clef: 'treble' },  
+                { id: 't_G4', name: 'G', solfege: 'Sol', freq: 392.00, y: 80,  clef: 'treble' },  
+                { id: 't_A4', name: 'A', solfege: 'La', freq: 440.00, y: 70,  clef: 'treble' },  
+                { id: 't_B4', name: 'B', solfege: 'Si', freq: 493.88, y: 60,  clef: 'treble' },  
+            ],
+            treble_high: [
+                { id: 't_C5', name: 'C', solfege: 'Do', freq: 523.25, y: 50, clef: 'treble' },  
+                { id: 't_D5', name: 'D', solfege: 'Re', freq: 587.33, y: 40, clef: 'treble' },  
+                { id: 't_E5', name: 'E', solfege: 'Mi', freq: 659.25, y: 30, clef: 'treble' }, 
+                { id: 't_F5', name: 'F', solfege: 'Fa', freq: 698.46, y: 20, clef: 'treble' },  
+                { id: 't_G5', name: 'G', solfege: 'Sol', freq: 783.99, y: 10, clef: 'treble' },  
+                { id: 't_A5', name: 'A', solfege: 'La', freq: 880.00, y: 0,  clef: 'treble' },   
+            ],
+            bass_high: [
+                { id: 'b_C3', name: 'C', solfege: 'Do', freq: 130.81, y: 70, clef: 'bass' },  
+                { id: 'b_D3', name: 'D', solfege: 'Re', freq: 146.83, y: 60, clef: 'bass' },  
+                { id: 'b_E3', name: 'E', solfege: 'Mi', freq: 164.81, y: 50, clef: 'bass' },  
+                { id: 'b_F3', name: 'F', solfege: 'Fa', freq: 174.61, y: 40, clef: 'bass' },  
+                { id: 'b_G3', name: 'G', solfege: 'Sol', freq: 196.00, y: 30, clef: 'bass' },  
+                { id: 'b_A3', name: 'A', solfege: 'La', freq: 220.00, y: 20, clef: 'bass' },  
+                { id: 'b_B3', name: 'B', solfege: 'Si', freq: 246.94, y: 10, clef: 'bass' },  
+                { id: 'b_C4', name: 'C', solfege: 'Do', freq: 261.63, y: 0,  clef: 'bass' },   
+            ]
+        };
+
+        const SOLFEGE_MAP = { C: 'Do', D: 'Re', E: 'Mi', F: 'Fa', G: 'Sol', A: 'La', B: 'Si' };
+        const ALL_TREBLE = Object.values(NOTE_DATABASE).filter((_, i) => Object.keys(NOTE_DATABASE)[i].startsWith('treble')).flat().filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+        const ALL_BASS = Object.values(NOTE_DATABASE).filter((_, i) => Object.keys(NOTE_DATABASE)[i].startsWith('bass')).flat().filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+
+        // --- 元件：星空背景 ---
+        const StarField = () => {
+            const stars = useMemo(() => Array.from({ length: 40 }).map((_, i) => ({
+                id: i, x: Math.random() * 100, y: Math.random() * 100,
+                size: Math.random() * 2 + 1, opacity: Math.random() * 0.7 + 0.1,
+                duration: Math.random() * 3 + 2, delay: Math.random() * 5
+            })), []);
+            return (
+                <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+                    {stars.map((star) => (
+                        <div key={star.id} className="absolute rounded-full bg-indigo-200 animate-twinkle" style={{ left: `${star.x}%`, top: `${star.y}%`, width: `${star.size}px`, height: `${star.size}px`, opacity: star.opacity, animationDuration: `${star.duration}s`, animationDelay: `${star.delay}s` }} />
+                    ))}
+                </div>
+            );
+        };
+
+        // --- 元件：雷射特效 ---
+        const Laser = ({ startX, startY, targetX, targetY }) => {
+            const dx = targetX - startX;
+            const dy = targetY - startY;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+            return (
+                <div className="absolute h-2 bg-cyan-300 shadow-[0_0_20px_#22d3ee] origin-left z-[50] pointer-events-none rounded-full"
+                    style={{ left: startX, top: startY, width: `${length}px`, transform: `rotate(${angle}deg)`, animation: 'laser-shot 0.25s ease-out forwards' }} />
+            );
+        };
+
+        // --- 元件：五線譜音符 (包含譜號修正) ---
+        const StaffNote = ({ note, showName = false, svgScale = 'scale-100', isTarget = false }) => {
+            const stemDirection = note.y > 60 ? 'up' : 'down';
+            const noteX = 115; 
+            const isBass = note.clef === 'bass';
+            const colorHex = isTarget ? '#22d3ee' : (NOTE_COLORS[note.name]?.hex || 'white');
+            return (
+                <div className="relative w-full h-full flex items-center justify-center pointer-events-none p-1 md:p-2">
+                    <svg viewBox="0 -30 160 180" className={`w-full h-full drop-shadow-lg overflow-visible transition-transform ${svgScale}`}>
+                        {[20, 40, 60, 80, 100].map(y => (
+                            <line key={y} x1="0" y1={y} x2="160" y2={y} stroke="rgba(255,255,255,0.6)" strokeWidth="2" />
+                        ))}
+                        {isBass ? (
+                            <text x="12" y="92" fontSize="105" fill="rgba(255,255,255,0.5)" fontFamily="serif" fontWeight="bold">𝄢</text>
+                        ) : (
+                            <text x="5" y="95" fontSize="120" fill="rgba(255,255,255,0.4)" fontFamily="serif">𝄞</text>
+                        )}
+                        {note.y >= 120 && <line x1={noteX - 18} y1="120" x2={noteX + 18} y2="120" stroke="white" strokeWidth="3" />}
+                        {note.y <= 0 && <line x1={noteX - 18} y1="0" x2={noteX + 18} y2="0" stroke="white" strokeWidth="3" />}
+                        <ellipse cx={noteX} cy={note.y} rx="9.5" ry="7.5" transform={`rotate(-15 ${noteX} ${note.y})`} fill={colorHex} />
+                        {stemDirection === 'up' ? (
+                            <line x1={noteX + 8.5} y1={note.y} x2={noteX + 8.5} y2={note.y - 45} stroke={colorHex} strokeWidth="2.5" />
+                        ) : (
+                            <line x1={noteX - 8.5} y1={note.y} x2={noteX - 8.5} y2={note.y + 45} stroke={colorHex} strokeWidth="2.5" />
+                        )}
+                    </svg>
+                    {showName && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-3xl md:text-4xl font-bold text-white drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)]">{note.name}</span>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- 主遊戲元件 ---
+        function PitchShooterGame() {
+            const [loginState, setLoginState] = useState({ isLoggedIn: false, name: '' });
+            const [isMicActive, setIsMicActive] = useState(false);
+            const [currentDetectedNote, setCurrentDetectedNote] = useState(null);
+            const [isGameMode, setIsGameMode] = useState(false);
+            const [selectedNoteIds, setSelectedNoteIds] = useState([]);
+            const [gameTargets, setGameTargets] = useState([]);
+            const [currentTargetIndex, setCurrentTargetIndex] = useState(0);
+            const [gameScore, setGameScore] = useState(0);
+            const [gameTime, setGameTime] = useState(0);
+            const [gameWon, setGameWon] = useState(false);
+            const [combo, setCombo] = useState(0);
+            const [maxCombo, setMaxCombo] = useState(0);
+            const [stats, setStats] = useState({ correct: 0, wrong: 0 });
+            const [lasers, setLasers] = useState([]);
+            const [wrongShake, setWrongShake] = useState(false);
+            const [showKeyboardHints, setShowKeyboardHints] = useState(false);
+            const [selectedClefTab, setSelectedClefTab] = useState('treble');
+            const [currentLevel, setCurrentLevel] = useState('treble_mid');
+
+            const audioCtxRef = useRef(null);
+            const micStreamRef = useRef(null);
+            const volumeBarRef = useRef(null);
+            const timerRef = useRef(null);
+            const startTimeRef = useRef(0);
+            const targetRefs = useRef({});
+            const wasMicActiveRef = useRef(false);
+            const lastDetectedNoteRef = useRef(null);
+            const matchFramesRef = useRef(0);
+
+            // 取得或初始化 AudioContext
+            const getAudioContext = useCallback(() => {
+                if (!audioCtxRef.current) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    audioCtxRef.current = new AudioContext();
+                }
+                return audioCtxRef.current;
+            }, []);
+
+            // 停止麥克風
+            const stopMic = useCallback(() => {
+                if (micStreamRef.current) {
+                    micStreamRef.current.getTracks().forEach(track => track.stop());
+                    micStreamRef.current = null;
+                }
+                setIsMicActive(false);
+                setCurrentDetectedNote(null);
+                if(volumeBarRef.current) volumeBarRef.current.style.width = '0%';
+            }, []);
+
+            // 切換麥克風 (包含 iOS Safari 喚醒與修正)
+            const toggleMic = async () => {
+                if (isMicActive) { stopMic(); return; }
+                const audioCtx = getAudioContext();
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } 
+                    });
+                    micStreamRef.current = stream;
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    const gainNode = audioCtx.createGain();
+                    gainNode.gain.value = 5.0; // 放大收音
+                    const analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 2048;
+                    source.connect(gainNode);
+                    gainNode.connect(analyser);
+
+                    // --- 🍏 iOS Safari 終極修正 ---
+                    const silence = audioCtx.createGain();
+                    silence.gain.value = 0;
+                    analyser.connect(silence);
+                    silence.connect(audioCtx.destination);
+
+                    setIsMicActive(true);
+                    detectPitchLoop(analyser, audioCtx.sampleRate);
+                } catch (err) { alert("無法存取麥克風，請檢查設定！"); }
+            };
+
+            // 音高偵測迴圈
+            const detectPitchLoop = (analyser, sampleRate) => {
+                const buffer = new Float32Array(analyser.fftSize);
+                const loop = () => {
+                    if (!micStreamRef.current) return;
+                    analyser.getFloatTimeDomainData(buffer);
+                    let rms = 0;
+                    for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
+                    rms = Math.sqrt(rms / buffer.length);
+                    if (volumeBarRef.current) volumeBarRef.current.style.width = Math.min(100, rms * 500) + '%';
+                    
+                    if (rms > 0.0015) {
+                        const freq = autoCorrelate(buffer, sampleRate);
+                        if (freq !== -1) {
+                            const note = noteFromPitch(freq);
+                            if (note) {
+                                setCurrentDetectedNote(note);
+                                if (lastDetectedNoteRef.current === note) matchFramesRef.current++;
+                                else { lastDetectedNoteRef.current = note; matchFramesRef.current = 1; }
+                                if (matchFramesRef.current >= 4 && matchFramesRef.current % 4 === 0) {
+                                    window.dispatchEvent(new CustomEvent('micNoteDetected', { detail: note }));
+                                }
+                            }
+                        }
+                    }
+                    requestAnimationFrame(loop);
+                };
+                loop();
+            };
+
+            // 視窗自動恢復音效與麥克風
+            useEffect(() => {
+                const handleVisibility = async () => {
+                    if (document.hidden) {
+                        if (isMicActive) { wasMicActiveRef.current = true; stopMic(); }
+                    } else {
+                        const ctx = audioCtxRef.current;
+                        if (ctx && ctx.state === 'suspended') await ctx.resume();
+                        if (wasMicActiveRef.current) { wasMicActiveRef.current = false; toggleMic(); }
+                    }
+                };
+                window.addEventListener('visibilitychange', handleVisibility);
+                return () => window.removeEventListener('visibilitychange', handleVisibility);
+            }, [isMicActive, stopMic]);
+
+            // 處理輸入邏輯
+            const processInput = useCallback((inputPitch, source) => {
+                setGameTargets(prev => {
+                    const current = prev[currentTargetIndex];
+                    if (!current || current.isExploding) return prev;
+                    const targetName = current.id.split('_')[1].replace(/[0-9]/g, '');
+                    const inputName = inputPitch.replace(/[0-9]/g, '');
+                    const isMatch = (source === 'mic') ? (targetName === inputName) : (inputPitch === current.id.split('_')[1]);
+
+                    if (isMatch) {
+                        setStats(s => ({ ...s, correct: s.correct + 1 }));
+                        setCombo(c => { const nc = c + 1; setMaxCombo(mc => Math.max(mc, nc)); return nc; });
+                        setGameScore(s => s + 100 + (combo * 50));
+                        if(source !== 'mic') playSound(audioCtxRef.current, 'note', current.freq);
+                        const nextTargets = [...prev];
+                        nextTargets[currentTargetIndex] = { ...current, isExploding: true };
+                        setTimeout(() => {
+                            setCurrentTargetIndex(i => {
+                                if (i + 1 < prev.length) return i + 1;
+                                setGameWon(true); clearInterval(timerRef.current); return i;
+                            });
+                        }, 500);
+                        return nextTargets;
+                    } else if (source === 'keyboard') {
+                        setCombo(0); setWrongShake(true); playSound(audioCtxRef.current, 'error');
+                        setTimeout(() => setWrongShake(false), 400);
+                    }
+                    return prev;
+                });
+            }, [currentTargetIndex, combo]);
+
+            useEffect(() => {
+                const handleMic = (e) => { if (isGameMode) processInput(e.detail, 'mic'); };
+                window.addEventListener('micNoteDetected', handleMic);
+                return () => window.removeEventListener('micNoteDetected', handleMic);
+            }, [isGameMode, processInput]);
+
+            // 開始遊戲
+            const startGame = () => {
+                if (selectedNoteIds.length < 2) return;
+                setIsGameMode(true); setGameWon(false); setGameScore(0); setGameTime(0); setCombo(0); setCurrentTargetIndex(0);
+                const active = [...ALL_TREBLE, ...ALL_BASS].filter(n => selectedNoteIds.includes(n.id));
+                const pool = Array.from({ length: 15 }, () => active[Math.floor(Math.random() * active.length)]).map((n, i) => ({ ...n, uid: `${n.id}-${i}`, isExploding: false }));
+                setGameTargets(pool);
+                startTimeRef.current = Date.now();
+                timerRef.current = setInterval(() => setGameTime(((Date.now() - startTimeRef.current)/1000).toFixed(2)), 50);
+            };
+
+            const toggleNote = (note) => {
+                setSelectedNoteIds(prev => prev.includes(note.id) ? prev.filter(id => id !== note.id) : [...prev, note.id]);
+                playSound(getAudioContext(), 'note', note.freq);
+            };
+
+            const dynamicKeys = useMemo(() => {
+                if (!isGameMode) return [];
+                const octs = gameTargets.map(t => parseInt(t.id.split('_')[1].slice(-1)));
+                const min = Math.min(...octs), max = Math.max(...octs);
+                const keys = [];
+                const names = [{n:'C', b:true}, {n:'D', b:true}, {n:'E', b:false}, {n:'F', b:true}, {n:'G', b:true}, {n:'A', b:true}, {n:'B', b:false}];
+                for (let o = min; o <= max; o++) names.forEach(k => keys.push({ name: k.n, hasBlack: k.b, pitch: `${k.n}${o}` }));
+                return keys;
+            }, [isGameMode, gameTargets]);
+
+            // --- 渲染畫面 ---
+            if (!loginState.isLoggedIn) {
+                return (
+                    <div className="w-full h-full relative music-space-bg flex flex-col items-center justify-center p-4 text-white">
+                        <StarField />
+                        <div className="bg-slate-900/90 border-2 border-cyan-500/50 rounded-3xl p-8 max-w-sm w-full z-10 animate-pop">
+                            <Icons.Music className="w-12 h-12 text-cyan-400 mx-auto mb-4" />
+                            <h2 className="text-2xl font-bold text-center mb-6 font-zh">音符射擊大挑戰</h2>
+                            <input type="text" value={loginState.name} onChange={e => setLoginState({...loginState, name: e.target.value})} className="w-full bg-slate-800 border border-slate-600 px-4 py-3 rounded-xl mb-4 font-zh" placeholder="你的玩家名稱..." />
+                            <button onClick={() => loginState.name.trim() && setLoginState({isLoggedIn:true, name:loginState.name.trim()})} className="w-full py-4 rounded-xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500">進入大廳</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="w-full h-full relative music-space-bg flex flex-col overflow-hidden text-white font-zh">
+                    <StarField />
+                    {!isGameMode ? (
+                        <div className="z-10 flex flex-col items-center p-4">
+                            <h1 className="text-2xl font-bold mb-4">測驗大廳</h1>
+                            <div className="flex gap-4 mb-6">
+                                <button onClick={toggleMic} className={`px-6 py-2 rounded-xl flex items-center gap-2 ${isMicActive ? 'bg-emerald-500' : 'bg-slate-800'}`}>
+                                    {isMicActive ? <Icons.Mic /> : <Icons.MicOff />} {isMicActive ? '監聽中' : '開啟偵測'}
+                                </button>
+                                <div className="w-40 bg-slate-800 rounded-full h-4 self-center overflow-hidden border border-slate-700">
+                                    <div ref={volumeBarRef} className="h-full bg-emerald-400 transition-all duration-75" style={{width: '0%'}}></div>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                                {(selectedClefTab === 'treble' ? ALL_TREBLE : ALL_BASS).map(note => (
+                                    <button key={note.id} onClick={() => toggleNote(note)} className={`w-32 h-24 border-2 rounded-xl transition-all ${selectedNoteIds.includes(note.id) ? 'border-cyan-400 bg-slate-800' : 'border-slate-700 opacity-50'}`}>
+                                        <StaffNote note={note} showName={selectedNoteIds.includes(note.id)} svgScale="scale-90" />
+                                    </button>
+                                ))}
+                            </div>
+                            <button onClick={startGame} className="px-12 py-4 rounded-full bg-fuchsia-600 font-bold text-xl shadow-lg">開始測驗</button>
+                        </div>
+                    ) : (
+                        <div className="z-10 flex flex-col flex-1">
+                            <div className="p-4 flex justify-between items-center">
+                                <button onClick={() => setIsGameMode(false)} className="bg-slate-800 px-4 py-2 rounded-lg">返回</button>
+                                <div className="text-xl">Score: {gameScore} | Time: {gameTime}s</div>
+                                <button onClick={() => setShowKeyboardHints(!showKeyboardHints)} className="bg-slate-800 px-4 py-2 rounded-lg">{showKeyboardHints ? '隱藏提示' : '顯示提示'}</button>
+                            </div>
+                            <div className="flex-1 flex flex-col items-center justify-center">
+                                {gameTargets[currentTargetIndex] && (
+                                    <div className={`w-64 h-48 bg-slate-800/80 border-4 rounded-3xl flex items-center justify-center ${wrongShake ? 'border-red-500 animate-shake-err' : 'border-cyan-400 shadow-xl'}`}>
+                                        <StaffNote note={gameTargets[currentTargetIndex]} isTarget={true} svgScale="scale-125" />
+                                    </div>
+                                )}
+                            </div>
+                            <div className="p-4 h-40 flex bg-slate-900/80">
+                                {dynamicKeys.map(k => (
+                                    <button key={k.pitch} id={`piano-key-${k.pitch}`} onClick={() => processInput(k.pitch, 'keyboard')} className={`flex-1 border border-slate-700 flex flex-col justify-end items-center pb-2 transition-colors ${currentDetectedNote === k.pitch ? 'bg-emerald-200' : 'bg-white text-black active:bg-slate-300'}`}>
+                                        {showKeyboardHints && <span className="font-bold">{k.name}</span>}
+                                        {k.hasBlack && <div className="absolute top-0 right-[-25%] w-1/2 h-1/2 bg-black rounded-b-md z-20"></div>}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {gameWon && (
+                        <div className="absolute inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-8 animate-pop">
+                            <h2 className="text-4xl font-bold mb-4">挑戰成功！</h2>
+                            <div className="text-2xl mb-8">總分：{gameScore} | 時間：{gameTime}s</div>
+                            <button onClick={() => setIsGameMode(false)} className="px-12 py-4 bg-cyan-500 rounded-full font-bold">回大廳</button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<PitchShooterGame />);
+    </script>
+</body>
+</html>
