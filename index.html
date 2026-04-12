@@ -318,10 +318,10 @@
                         ))}
                         
                         {isBass ? (
-                            <text x="12" y="92" fontSize="105" fill="rgba(255,255,255,0.5)" fontFamily="serif" fontWeight="bold"></text>
-                        ) : (
-                            <text x="5" y="95" fontSize="120" fill="rgba(255,255,255,0.4)" fontFamily="serif"></text>
-                        )}
+    <text x="12" y="92" fontSize="105" fill="rgba(255,255,255,0.5)" fontFamily="serif" fontWeight="bold">𝄢</text>
+) : (
+    <text x="5" y="95" fontSize="120" fill="rgba(255,255,255,0.4)" fontFamily="serif">𝄞</text>
+)}
 
                         {note.y >= 120 && <line x1={noteX - 18} y1="120" x2={noteX + 18} y2="120" stroke="white" strokeWidth="3" />}
                         {note.y <= 0 && <line x1={noteX - 18} y1="0" x2={noteX + 18} y2="0" stroke="white" strokeWidth="3" />}
