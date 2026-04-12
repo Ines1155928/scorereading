@@ -86,7 +86,6 @@
             }
         };
 
-        // 只要玩家碰到螢幕，立刻喚醒音效！繞過 React 的事件包裝
         window.addEventListener('click', forceWakeAudio, { capture: true });
         window.addEventListener('touchstart', forceWakeAudio, { capture: true });
         // --------------------------------------------------
@@ -166,6 +165,10 @@
 
         const playSound = (ctx, type, freq = 440) => {
             if (!ctx) return;
+            if (ctx.state === 'suspended') {
+                ctx.resume().catch(() => {});
+            }
+
             const t = ctx.currentTime;
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
@@ -420,8 +423,6 @@
         const timerRef = useRef(null);
         const startTimeRef = useRef(0);
         const targetRefs = useRef({}); 
-        
-        const wasMicActiveRef = useRef(false);
 
         // 使用唯一的 Float32Array 避免記憶體不斷重置
         const bufferRef = useRef(new Float32Array(2048));
@@ -445,7 +446,7 @@
             lastDetectedNoteRef.current = null;
         }, []);
 
-        // 這次保證 100% 只用你「音準大冒險」的寫法
+        // 【最終還原修正】：完全拷貝音準大冒險的連線邏輯，不使用 await 卡住
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
@@ -458,7 +459,7 @@
             try {
                 // 完全比照音準大冒險的設定參數
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, noiseSuppression: false } 
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
                 });
                 
                 stream.getTracks()[0].onended = () => {
@@ -716,6 +717,7 @@
             setSelectedNoteIds([]);
         };
 
+        // --- 修復題目隨機出現邏輯 ---
         const startGame = () => {
             if (selectedNoteIds.length < 2) {
                 setValidationShake(true);
@@ -739,6 +741,7 @@
             const TOTAL_QUESTIONS = 15; 
             let pool = [];
 
+            // 1. 保證每個題目出現次數平均
             const fullSets = Math.floor(TOTAL_QUESTIONS / activeNotes.length);
             const remainder = TOTAL_QUESTIONS % activeNotes.length;
             for (let i = 0; i < fullSets; i++) {
@@ -750,14 +753,16 @@
                 pool.push(...shuffledActive.slice(0, remainder));
             }
 
+            // 2. 徹底洗牌 (Fisher-Yates Shuffle)
             for (let i = pool.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [pool[i], pool[j]] = [pool[j], pool[i]];
             }
 
+            // 3. 避免「超過2次」以上的連續重複，但不強迫完全不重複 (解決 do,re,do,re 規律問題)
             if (activeNotes.length > 1) {
-                for (let i = 1; i < pool.length; i++) {
-                    if (pool[i].id === pool[i - 1].id) {
+                for (let i = 2; i < pool.length; i++) {
+                    if (pool[i].id === pool[i - 1].id && pool[i].id === pool[i - 2].id) {
                         for (let j = i + 1; j < pool.length; j++) {
                             if (pool[j].id !== pool[i].id) {
                                 [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -1127,7 +1132,7 @@
                                 )}
                             </div>
                             <div className="w-full h-2 md:h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
-                                <div id="lobby-volume-bar" className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75"></div>
+                                <div id="lobby-volume-bar" className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75" style={{ width: '0%' }}></div>
                             </div>
                             
                             <div className="flex items-center gap-2 mt-1">
@@ -1263,7 +1268,7 @@
                                         <span className="text-emerald-400 font-bold">{currentDetectedNote || '-'}</span>
                                     </div>
                                     <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
-                                        <div id="game-volume-bar" className="h-full bg-emerald-400 transition-all duration-75"></div>
+                                        <div id="game-volume-bar" className="h-full bg-emerald-400 transition-all duration-75" style={{ width: '0%' }}></div>
                                     </div>
                                 </div>
                             )}
