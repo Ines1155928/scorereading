@@ -65,12 +65,12 @@
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
         const GAME_ID = '音符射擊遊戲';
-        // 👇 這邊記得維持你原本發布的網址！
+        // 👇 這邊記得維持你的 Google 部署網址喔！
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7qB2N3skJjYa8qsi9ewOfTu-7UjfUzGx9h1O6drZqW84td_hyAlKpHw_TDldViIIEYg/exec';
         
         const PENALTY_PER_SECOND = 3; 
 
-        // 🌟 移植自音準大冒險的「高穩定度」音高分析演算法 (含防崩潰保護)
+        // 🌟 完全移植自音準大冒險的核心演算法 [cite: 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324]
         function autoCorrelate(buf, sampleRate) {
             let SIZE = buf.length;
             let r1 = 0, r2 = SIZE - 1, thres = 0.2;
@@ -87,7 +87,7 @@
             let maxval = -1, maxpos = -1;
             for (let i = d; i < SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
             
-            let clarity = maxval / (c[0] || 1); // 防止除以零
+            let clarity = maxval / (c[0] || 1); 
             if (clarity < 0.5) { return -1; }
 
             let T0 = maxpos;
@@ -102,7 +102,6 @@
             return sampleRate / T0;
         }
 
-        // 🌟 防崩潰保護：過濾無效頻率
         function noteFromPitch(frequency) {
             if (!frequency || frequency <= 0 || frequency === Infinity || Number.isNaN(frequency)) return null;
             const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -398,6 +397,7 @@
         const [isSubmitting, setIsSubmitting] = useState(false);
         const [isSubmitted, setIsSubmitted] = useState(false);
 
+        // --- 麥克風相關 State 與 Refs ---
         const [isMicActive, setIsMicActive] = useState(false);
         const [currentDetectedNote, setCurrentDetectedNote] = useState(null); 
         
@@ -414,15 +414,7 @@
         const startTimeRef = useRef(0);
         const targetRefs = useRef({}); 
 
-        // 🌟 確保所有需要 AudioContext 的地方都不會出錯
-        const getAudioContext = useCallback(() => {
-            if (!audioCtxRef.current) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                audioCtxRef.current = new AudioContext();
-            }
-            return audioCtxRef.current;
-        }, []);
-
+        // 🌟 確保元件卸載或分頁關閉時，釋放麥克風資源
         const stopMic = useCallback(() => {
             if (pitchRafRef.current) cancelAnimationFrame(pitchRafRef.current);
             if (micStreamRef.current) {
@@ -449,30 +441,48 @@
             };
         }, [isMicActive, stopMic]);
 
+        // 🌟 核心修復 1：安全可靠的 AudioContext 建立與喚醒
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
                 return;
             }
             
-            const audioCtx = getAudioContext();
+            let audioCtx = audioCtxRef.current;
+            if (!audioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+                audioCtxRef.current = audioCtx;
+            }
+            
+            // Safari 規定必須在點擊瞬間強制喚醒
             if (audioCtx.state === 'suspended') {
                 await audioCtx.resume();
             }
 
             try {
+                // 取消所有降噪，確保樂器原音進入
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } 
                 });
-                micStreamRef.current = stream;
                 
+                // 監聽系統是否強制關閉麥克風
+                stream.getTracks()[0].onended = () => {
+                    console.log("麥克風連線被系統中斷");
+                    stopMic();
+                };
+
+                micStreamRef.current = stream;
                 const source = audioCtx.createMediaStreamSource(stream);
+                
+                // 🌟 核心修復 2：加裝放大器節點，靈敏度放大 5 倍
                 const micGainNode = audioCtx.createGain();
-                micGainNode.gain.value = 8.0; 
+                micGainNode.gain.value = 5.0; 
                 
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
                 
+                // 💡 關鍵：只連到分析器，【絕對不要】連到 audioCtx.destination，否則 Safari 幾秒後會切斷！[cite: 280, 281]
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
                 
@@ -506,9 +516,11 @@
                 rms = Math.sqrt(rms / buffer.length);
                 
                 if (volumeBarRef.current) {
+                    // 音量視覺回饋放大顯示
                     volumeBarRef.current.style.width = Math.min(100, rms * 100 * 5) + '%';
                 }
                 
+                // 聲音夠大才開始算音準
                 if (rms > 0.0015) {
                     const currentFreq = autoCorrelate(buffer, sampleRate);
                     
@@ -517,6 +529,7 @@
                         if (note) {
                             setCurrentDetectedNote(note);
                             
+                            // 🌟 核心修復 3：連續發射機制
                             if (lastDetectedNoteRef.current === note) {
                                 matchFramesRef.current++;
                             } else {
@@ -524,7 +537,9 @@
                                 matchFramesRef.current = 1;
                             }
                             
-                            if (matchFramesRef.current === 6) {
+                            // 只要連續抓到同一個音超過 4 次 (約 60 毫秒)，並且每 4 次就發送一次開火訊號！
+                            // 這樣只要你一直長唱/長吹，它就會像機關槍一樣一直幫你過關！
+                            if (matchFramesRef.current >= 4 && matchFramesRef.current % 4 === 0) {
                                 window.dispatchEvent(new CustomEvent('micNoteDetected', { detail: note }));
                             }
                         } else {
@@ -819,6 +834,7 @@
         const processInput = useCallback((inputPitch, source) => {
             setGameTargets(prevTargets => {
                 const currentTarget = prevTargets[currentTargetIndex];
+                // 防呆：如果這個目標已經在爆炸動畫中，就不要再重複計算了
                 if (!currentTarget || currentTarget.isExploding) return prevTargets;
 
                 const targetPitch = currentTarget.id.split('_')[1]; 
@@ -879,7 +895,7 @@
                     return prevTargets;
                 }
             });
-        }, [currentTargetIndex, gameTargets.length, combo, isMicActive, getAudioContext]);
+        }, [currentTargetIndex, gameTargets.length, combo, isMicActive]);
 
         const handleNoteInput = (inputPitch) => {
             if (!isGameMode) return;
@@ -1115,26 +1131,29 @@
                         </h1>
                     </div>
 
-                    <div className="absolute right-2 top-14 md:right-4 md:top-16 z-50 flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-2">
-                            {currentDetectedNote && isMicActive && (
-                                <span className="text-emerald-400 font-mono font-bold bg-emerald-900/30 px-2 py-1 rounded-lg text-sm border border-emerald-500/50">
-                                    🎵 {currentDetectedNote}
-                                </span>
-                            )}
-                            <button onClick={toggleMic} className={`relative px-3 py-1.5 rounded-lg md:rounded-xl font-bold text-xs md:text-sm font-zh border flex items-center gap-1.5 transition-all shadow-md ${isMicActive ? 'bg-emerald-500 text-white border-emerald-400 mic-active-pulse' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-white'}`}>
-                                {isMicActive ? <Icons.Mic className="w-4 h-4"/> : <Icons.MicOff className="w-4 h-4"/>}
-                                <span className="hidden min-[400px]:inline">{isMicActive ? '麥克風：開啟' : '麥克風：關閉'}</span>
-                                
-                                {isMicActive && (
-                                    <div className="absolute bottom-0 left-0 h-1 bg-emerald-200 rounded-b-lg transition-all duration-75" ref={volumeBarRef} style={{ width: '0%' }}></div>
+                    {/* 🌟 全新麥克風控制面板 (永遠顯示音量條) 🌟 */}
+                    <div className="absolute right-2 top-14 md:right-4 md:top-16 z-50 flex flex-col items-end gap-2 w-44 md:w-56">
+                        <button onClick={toggleMic} className={`w-full py-2 md:py-2.5 rounded-xl font-bold text-xs md:text-sm font-zh border flex justify-center items-center gap-2 transition-all shadow-md ${isMicActive ? 'bg-emerald-500 text-white border-emerald-400 mic-active-pulse' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-white'}`}>
+                            {isMicActive ? <Icons.Mic className="w-4 h-4 md:w-5 md:h-5"/> : <Icons.MicOff className="w-4 h-4 md:w-5 md:h-5"/>}
+                            <span>{isMicActive ? '麥克風：監聽中' : '開啟樂器偵測'}</span>
+                        </button>
+                        
+                        <div className={`w-full bg-slate-800/90 backdrop-blur-md border rounded-xl p-2.5 transition-all shadow-lg ${isMicActive ? 'border-emerald-500/50 opacity-100' : 'border-slate-700 opacity-50'}`}>
+                            <div className="flex justify-between items-center text-[10px] md:text-xs font-zh mb-1.5 text-slate-300">
+                                <span>收音與音高</span>
+                                {currentDetectedNote ? (
+                                    <span className="text-emerald-400 font-bold font-mono bg-emerald-900/50 px-1.5 rounded">{currentDetectedNote}</span>
+                                ) : (
+                                    <span className="text-slate-500 font-mono">--</span>
                                 )}
-                            </button>
+                            </div>
+                            <div className="w-full h-2 md:h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
+                                <div ref={volumeBarRef} className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75" style={{ width: '0%' }}></div>
+                            </div>
                         </div>
-                        {isMicActive && <span className="text-[10px] text-emerald-400/80 font-zh mr-1">請發出聲音測試音量條</span>}
                     </div>
 
-                    <div className={`flex gap-2 mb-0 mt-2 ${isAssignedModeActive ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className={`flex gap-2 mb-0 mt-4 ${isAssignedModeActive ? 'opacity-50 pointer-events-none' : ''}`}>
                         <button onClick={() => handleClefChange('treble')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-sm md:text-base font-zh transition-all shadow-md ${selectedClefTab === 'treble' && currentLevel !== 'infinite' ? 'bg-fuchsia-600 text-white shadow-[0_0_15px_rgba(217,70,239,0.5)]' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}>高音譜 𝄞</button>
                         <button onClick={() => handleClefChange('bass')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-sm md:text-base font-zh transition-all shadow-md ${selectedClefTab === 'bass' && currentLevel !== 'infinite' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}>低音譜 𝄢</button>
                         <button onClick={() => handleClefChange('infinite')} className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-xs md:text-sm font-zh flex items-center gap-1 transition-all shadow-md ${currentLevel === 'infinite' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}><Icons.Zap className="w-3 h-3" /> 檢視全部</button>
@@ -1229,21 +1248,23 @@
                             </div>
                         </div>
 
-                        {/* 遊戲中畫面麥克風按鈕 */}
+                        {/* 遊戲中畫面麥克風面板 (縮小版) */}
                         <div className="flex gap-1.5 md:gap-3">
-                            {currentDetectedNote && isMicActive && (
-                                <div className="hidden min-[500px]:flex items-center px-2 md:px-3 py-1.5 md:py-2 bg-emerald-900/50 text-emerald-300 border border-emerald-500/50 rounded-lg md:rounded-xl shadow-lg font-bold">
-                                    🎤 {currentDetectedNote}
+                            {isMicActive && (
+                                <div className="hidden min-[500px]:flex flex-col justify-center px-2 py-0.5 bg-slate-800/90 border border-emerald-500/50 rounded-xl shadow-lg w-24 md:w-32">
+                                    <div className="flex justify-between items-center text-[9px] md:text-[10px] text-slate-300 font-zh mb-0.5">
+                                        <span>音量</span>
+                                        <span className="text-emerald-400 font-bold">{currentDetectedNote || '-'}</span>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
+                                        <div ref={volumeBarRef} className="h-full bg-emerald-400 transition-all duration-75" style={{ width: '0%' }}></div>
+                                    </div>
                                 </div>
                             )}
 
                             <button onClick={toggleMic} className={`relative px-2.5 md:px-3 py-1.5 md:py-2 rounded-lg md:rounded-xl backdrop-blur-md border flex items-center gap-1 md:gap-1.5 font-zh transition-all shadow-lg active:scale-95 ${isMicActive ? 'bg-emerald-500 border-emerald-400 text-white mic-active-pulse' : 'bg-slate-800/90 border-slate-500 text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
                                 {isMicActive ? <Icons.Mic className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <Icons.MicOff className="w-3.5 h-3.5 md:w-4 md:h-4" />}
-                                <span className="hidden min-[400px]:inline">{isMicActive ? '開啟中' : '已關閉'}</span>
-                                {/* 音量指示條 */}
-                                {isMicActive && (
-                                    <div className="absolute bottom-0 left-0 h-1 bg-emerald-200 rounded-b-xl transition-all duration-75" ref={volumeBarRef} style={{ width: '0%' }}></div>
-                                )}
+                                <span className="hidden min-[400px]:inline">{isMicActive ? '監聽中' : '已關閉'}</span>
                             </button>
 
                             <button onClick={() => setShowKeyboardHints(!showKeyboardHints)} className={`px-2.5 md:px-3 py-1.5 md:py-2 text-white rounded-lg md:rounded-xl backdrop-blur-md border flex items-center gap-1 md:gap-1.5 font-zh transition-all shadow-lg active:scale-95 ${!showKeyboardHints ? 'bg-fuchsia-600/90 border-fuchsia-400' : 'bg-slate-800/90 border-slate-500 hover:bg-slate-700'}`}>
