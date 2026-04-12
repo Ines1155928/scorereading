@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 絕對音準版</title>
+    <title>五線譜音高認知射擊遊戲 - 直笛友善版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -832,8 +832,20 @@
 
                 const targetPitch = currentTarget.id.split('_')[1]; 
 
-                // 【嚴格音高修正】：直接比對包含八度音的完整字串 (例如 'C4' === 'C4')
-                const isMatch = (inputPitch === targetPitch);
+                let isMatch = false;
+
+                if (source === 'mic') {
+                    // 【高音直笛特化】：允許「精準命中」或「剛好高八度」
+                    const targetBase = targetPitch.replace(/[0-9]/g, '');
+                    const targetOct = parseInt(targetPitch.replace(/[^0-9]/g, ''));
+                    const inputBase = inputPitch.replace(/[0-9]/g, '');
+                    const inputOct = parseInt(inputPitch.replace(/[^0-9]/g, ''));
+                    
+                    isMatch = (inputBase === targetBase) && (inputOct === targetOct || inputOct === targetOct + 1);
+                } else {
+                    // 鍵盤點擊必須完全一致
+                    isMatch = (inputPitch === targetPitch);
+                }
 
                 if (isMatch) {
                     setCombo(c => { const nc = c + 1; setMaxCombo(mc => Math.max(mc, nc)); return nc; });
@@ -1268,7 +1280,11 @@
                         <div className="w-full max-w-6xl mx-auto h-full flex relative shadow-2xl rounded-b-xl">
                             <div className="absolute top-0 left-0 right-0 h-3 md:h-4 bg-red-800 rounded-t-sm z-0"></div>
                             {dynamicKeys.map((k, index) => {
-                                const isMicHighlight = isMicActive && currentDetectedNote && currentDetectedNote === k.pitch;
+                                // 【高音直笛特化】：讓虛擬鍵盤在接收到高八度直笛音時，也能亮起對應的目標按鍵
+                                const isMicHighlight = isMicActive && currentDetectedNote && 
+                                    (currentDetectedNote === k.pitch || 
+                                    (currentDetectedNote.replace(/[0-9]/g, '') === k.name && parseInt(currentDetectedNote.replace(/[^0-9]/g, '')) - 1 === parseInt(k.pitch.replace(/[^0-9]/g, ''))));
+                                
                                 return (
                                 <div key={k.pitch} className="relative flex pt-2 md:pt-3 flex-1 min-w-0">
                                     <button
