@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 終極穩定版</title>
+    <title>五線譜音高認知射擊遊戲 - 絕對音準版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -390,7 +390,6 @@
         const analyserRef = useRef(null);
         const pitchRafRef = useRef(null);
         const audioCtxRef = useRef(null);
-        const keepAliveOscRef = useRef(null); // 幽靈音軌專用 Ref
         
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
@@ -431,14 +430,6 @@
                 micStreamRef.current.getTracks().forEach(track => track.stop());
                 micStreamRef.current = null;
             }
-            
-            // 關閉幽靈音軌
-            if (keepAliveOscRef.current) {
-                try { keepAliveOscRef.current.stop(); } catch(e) {}
-                keepAliveOscRef.current.disconnect();
-                keepAliveOscRef.current = null;
-            }
-
             setIsMicActive(false);
             setCurrentDetectedNote(null);
             
@@ -461,17 +452,6 @@
             if (audioCtx.state === 'suspended') {
                 try { await audioCtx.resume(); } catch(e) {}
             }
-
-            // 【蘋果 Safari 專屬魔法】：播一個極小聲的背景幽靈音，強迫 Safari 保持音訊通道開啟
-            try {
-                const keepAliveOsc = audioCtx.createOscillator();
-                const keepAliveGain = audioCtx.createGain();
-                keepAliveGain.gain.value = 0.001; // 人耳幾乎聽不到的極小音量
-                keepAliveOsc.connect(keepAliveGain);
-                keepAliveGain.connect(audioCtx.destination);
-                keepAliveOsc.start();
-                keepAliveOscRef.current = keepAliveOsc;
-            } catch(e) {}
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -537,16 +517,7 @@
             const loop = () => {
                 if (!micStreamRef.current) return;
                 
-                // 為了相容較舊的 iOS Safari，加入 fallback 防呆
-                if (analyser.getFloatTimeDomainData) {
-                    analyser.getFloatTimeDomainData(buffer);
-                } else {
-                    const dataArray = new Uint8Array(analyser.fftSize);
-                    analyser.getByteTimeDomainData(dataArray);
-                    for (let i = 0; i < analyser.fftSize; i++) {
-                        buffer[i] = (dataArray[i] / 128.0) - 1.0;
-                    }
-                }
+                analyser.getFloatTimeDomainData(buffer);
 
                 let rms = 0;
                 for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
@@ -861,18 +832,8 @@
 
                 const targetPitch = currentTarget.id.split('_')[1]; 
 
-                let isMatch = false;
-
-                if (source === 'mic') {
-                    const targetBase = targetPitch.replace(/[0-9]/g, '');
-                    const targetOct = parseInt(targetPitch.replace(/[^0-9]/g, ''));
-                    const inputBase = inputPitch.replace(/[0-9]/g, '');
-                    const inputOct = parseInt(inputPitch.replace(/[^0-9]/g, ''));
-                    
-                    isMatch = (inputBase === targetBase) && (inputOct === targetOct || inputOct === targetOct + 1);
-                } else {
-                    isMatch = (inputPitch === targetPitch);
-                }
+                // 【嚴格音高修正】：直接比對包含八度音的完整字串 (例如 'C4' === 'C4')
+                const isMatch = (inputPitch === targetPitch);
 
                 if (isMatch) {
                     setCombo(c => { const nc = c + 1; setMaxCombo(mc => Math.max(mc, nc)); return nc; });
@@ -1307,11 +1268,7 @@
                         <div className="w-full max-w-6xl mx-auto h-full flex relative shadow-2xl rounded-b-xl">
                             <div className="absolute top-0 left-0 right-0 h-3 md:h-4 bg-red-800 rounded-t-sm z-0"></div>
                             {dynamicKeys.map((k, index) => {
-                                // 【高音直笛特化】：讓虛擬鍵盤在接收到高八度直笛音時，也能亮起對應的目標按鍵
-                                const isMicHighlight = isMicActive && currentDetectedNote && 
-                                    (currentDetectedNote === k.pitch || 
-                                    (currentDetectedNote.replace(/[0-9]/g, '') === k.name && parseInt(currentDetectedNote.replace(/[^0-9]/g, '')) - 1 === parseInt(k.pitch.replace(/[^0-9]/g, ''))));
-                                
+                                const isMicHighlight = isMicActive && currentDetectedNote && currentDetectedNote === k.pitch;
                                 return (
                                 <div key={k.pitch} className="relative flex pt-2 md:pt-3 flex-1 min-w-0">
                                     <button
