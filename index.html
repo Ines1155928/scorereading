@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 直笛友善版</title>
+    <title>五線譜音高認知射擊遊戲 - 終極穩定版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -390,6 +390,7 @@
         const analyserRef = useRef(null);
         const pitchRafRef = useRef(null);
         const audioCtxRef = useRef(null);
+        const keepAliveOscRef = useRef(null); // 幽靈音軌專用 Ref
         
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
@@ -430,6 +431,14 @@
                 micStreamRef.current.getTracks().forEach(track => track.stop());
                 micStreamRef.current = null;
             }
+            
+            // 關閉幽靈音軌
+            if (keepAliveOscRef.current) {
+                try { keepAliveOscRef.current.stop(); } catch(e) {}
+                keepAliveOscRef.current.disconnect();
+                keepAliveOscRef.current = null;
+            }
+
             setIsMicActive(false);
             setCurrentDetectedNote(null);
             
@@ -452,6 +461,17 @@
             if (audioCtx.state === 'suspended') {
                 try { await audioCtx.resume(); } catch(e) {}
             }
+
+            // 【蘋果 Safari 專屬魔法】：播一個極小聲的背景幽靈音，強迫 Safari 保持音訊通道開啟
+            try {
+                const keepAliveOsc = audioCtx.createOscillator();
+                const keepAliveGain = audioCtx.createGain();
+                keepAliveGain.gain.value = 0.001; // 人耳幾乎聽不到的極小音量
+                keepAliveOsc.connect(keepAliveGain);
+                keepAliveGain.connect(audioCtx.destination);
+                keepAliveOsc.start();
+                keepAliveOscRef.current = keepAliveOsc;
+            } catch(e) {}
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -517,7 +537,16 @@
             const loop = () => {
                 if (!micStreamRef.current) return;
                 
-                analyser.getFloatTimeDomainData(buffer);
+                // 為了相容較舊的 iOS Safari，加入 fallback 防呆
+                if (analyser.getFloatTimeDomainData) {
+                    analyser.getFloatTimeDomainData(buffer);
+                } else {
+                    const dataArray = new Uint8Array(analyser.fftSize);
+                    analyser.getByteTimeDomainData(dataArray);
+                    for (let i = 0; i < analyser.fftSize; i++) {
+                        buffer[i] = (dataArray[i] / 128.0) - 1.0;
+                    }
+                }
 
                 let rms = 0;
                 for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
@@ -835,7 +864,6 @@
                 let isMatch = false;
 
                 if (source === 'mic') {
-                    // 【高音直笛特化】：允許「精準命中」或「剛好高八度」
                     const targetBase = targetPitch.replace(/[0-9]/g, '');
                     const targetOct = parseInt(targetPitch.replace(/[^0-9]/g, ''));
                     const inputBase = inputPitch.replace(/[0-9]/g, '');
@@ -843,7 +871,6 @@
                     
                     isMatch = (inputBase === targetBase) && (inputOct === targetOct || inputOct === targetOct + 1);
                 } else {
-                    // 鍵盤點擊必須完全一致
                     isMatch = (inputPitch === targetPitch);
                 }
 
