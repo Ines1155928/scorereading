@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 終極修復版</title>
+    <title>五線譜音高認知射擊遊戲 - 終極穩定版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -390,7 +390,6 @@
         const analyserRef = useRef(null);
         const pitchRafRef = useRef(null);
         const audioCtxRef = useRef(null);
-        const volumeBarRef = useRef(null); 
         
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
@@ -399,15 +398,29 @@
         const startTimeRef = useRef(0);
         const targetRefs = useRef({}); 
         
-        const wasMicActiveRef = useRef(false);
-
-        // 獨立出一個純粹獲取 AudioContext 的函數
+        // 取得或初始化 AudioContext
         const getAudioContext = useCallback(() => {
             if (!audioCtxRef.current) {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 audioCtxRef.current = new AudioContext();
             }
             return audioCtxRef.current;
+        }, []);
+
+        // 【極致穩定版修正】：加入全域事件監聽，只要玩家點擊畫面，立刻修復休眠的音效引擎
+        useEffect(() => {
+            const unlockAudio = () => {
+                const ctx = audioCtxRef.current;
+                if (ctx && ctx.state === 'suspended') {
+                    ctx.resume();
+                }
+            };
+            window.addEventListener('click', unlockAudio, true);
+            window.addEventListener('touchstart', unlockAudio, true);
+            return () => {
+                window.removeEventListener('click', unlockAudio, true);
+                window.removeEventListener('touchstart', unlockAudio, true);
+            };
         }, []);
 
         const stopMic = useCallback(() => {
@@ -418,11 +431,18 @@
             }
             setIsMicActive(false);
             setCurrentDetectedNote(null);
-            if(volumeBarRef.current) volumeBarRef.current.style.width = '0%';
+            
+            // 安全地重置兩個畫面的音量條
+            const lBar = document.getElementById('lobby-volume-bar');
+            const gBar = document.getElementById('game-volume-bar');
+            if (lBar) lBar.style.width = '0%';
+            if (gBar) gBar.style.width = '0%';
+            
             matchFramesRef.current = 0;
             lastDetectedNoteRef.current = null;
         }, []);
 
+        // 【極致穩定版修正】：完全移植「音準大冒險」的寫法，絕不亂接 destination 避免被蘋果切斷
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
@@ -430,19 +450,17 @@
             }
             
             const audioCtx = getAudioContext();
-
-            // 確保系統在此刻喚醒音效引擎
             if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
+                try { await audioCtx.resume(); } catch(e) {}
             }
 
             try {
+                // 完全比照音準大冒險的設定參數
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } 
+                    audio: { echoCancellation: false, noiseSuppression: false } 
                 });
                 
                 stream.getTracks()[0].onended = () => {
-                    console.log("麥克風連線被系統中斷");
                     stopMic();
                 };
 
@@ -455,16 +473,9 @@
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
                 
+                // 完全比照音準大冒險的路由：不接喇叭，只到分析器為止
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
-
-                // --- 🍏 針對 iOS Safari 的終極修正 ---
-                const safariHackGain = audioCtx.createGain();
-                // 極重要：不能設為絕對的 0！設為極小值 0.01 避免被 Safari 關閉處理通道
-                safariHackGain.gain.value = 0.01; 
-                analyser.connect(safariHackGain);
-                safariHackGain.connect(audioCtx.destination);
-                // ------------------------------------
                 
                 analyserRef.current = analyser;
                 setIsMicActive(true);
@@ -475,55 +486,24 @@
             }
         };
 
-        useEffect(() => {
-            const handleVisibilityChange = async () => {
-                if (document.hidden) {
-                    if (isMicActive) {
-                        wasMicActiveRef.current = true;
-                        stopMic();
-                    }
-                } else {
-                    const ctx = audioCtxRef.current;
-                    if (ctx && ctx.state === 'suspended') {
-                        try { await ctx.resume(); } catch(e) {}
-                    }
-                    if (wasMicActiveRef.current) {
-                        wasMicActiveRef.current = false;
-                        toggleMic();
-                    }
-                }
-            };
-
-            window.addEventListener('visibilitychange', handleVisibilityChange);
-            window.addEventListener('pagehide', stopMic);
-            
-            return () => {
-                window.removeEventListener('visibilitychange', handleVisibilityChange);
-                window.removeEventListener('pagehide', stopMic);
-                stopMic();
-            };
-        }, [isMicActive, stopMic]); 
-
         const detectPitchLoop = (analyser, sampleRate) => {
             const buffer = new Float32Array(analyser.fftSize);
             const loop = () => {
                 if (!micStreamRef.current) return;
-                if (analyser.getFloatTimeDomainData) {
-                    analyser.getFloatTimeDomainData(buffer);
-                } else {
-                    const dataArray = new Uint8Array(analyser.fftSize);
-                    analyser.getByteTimeDomainData(dataArray);
-                    for (let i = 0; i < analyser.fftSize; i++) {
-                        buffer[i] = (dataArray[i] / 128.0) - 1.0;
-                    }
-                }
+                
+                // 完全比照音準大冒險的抓取方式
+                analyser.getFloatTimeDomainData(buffer);
 
                 let rms = 0;
                 for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
                 rms = Math.sqrt(rms / buffer.length);
-                if (volumeBarRef.current) {
-                    volumeBarRef.current.style.width = Math.min(100, rms * 100 * 5) + '%';
-                }
+                
+                // 【極致穩定版修正】：改用 DOM ID 尋找音量條，避免 React 切換畫面時發生「找不到組件」的靈異現象
+                const lBar = document.getElementById('lobby-volume-bar');
+                const gBar = document.getElementById('game-volume-bar');
+                const widthStr = Math.min(100, rms * 100 * 5) + '%';
+                if (lBar) lBar.style.width = widthStr;
+                if (gBar) gBar.style.width = widthStr;
                 
                 if (rms > 0.0015) {
                     const currentFreq = autoCorrelate(buffer, sampleRate);
@@ -844,9 +824,9 @@
                     fireLaser(currentTarget.uid, targetPitch); 
                     
                     if (source !== 'mic') {
-                        playSound(audioCtxRef.current, 'note', currentTarget.freq);
+                        playSound(getAudioContext(), 'note', currentTarget.freq);
                     }
-                    setTimeout(() => { if(source !== 'mic') playSound(audioCtxRef.current, 'explosion') }, 150);
+                    setTimeout(() => { if(source !== 'mic') playSound(getAudioContext(), 'explosion') }, 150);
                     
                     const newTargets = [...prevTargets];
                     newTargets[currentTargetIndex] = { ...currentTarget, isExploding: true };
@@ -877,7 +857,7 @@
                         setCombo(0);
                         setStats(s => ({ ...s, wrong: s.wrong + 1 }));
                         setGameScore(s => s - 100); 
-                        playSound(audioCtxRef.current, 'error'); 
+                        playSound(getAudioContext(), 'error'); 
                         setWrongShake(true);
                         setTimeout(() => setWrongShake(false), 400);
                     }
@@ -1116,7 +1096,7 @@
                         </h1>
                     </div>
 
-                    {/* 全新麥克風控制面板 (永遠顯示音量條)  */}
+                    {/* 麥克風控制面板 */}
                     <div className="absolute right-2 top-14 md:right-4 md:top-16 z-50 flex flex-col items-end gap-2 w-44 md:w-56">
                         <button onClick={toggleMic} className={`w-full py-2 md:py-2.5 rounded-xl font-bold text-xs md:text-sm font-zh border flex justify-center items-center gap-2 transition-all shadow-md ${isMicActive ? 'bg-emerald-500 text-white border-emerald-400 mic-active-pulse' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-white'}`}>
                             {isMicActive ? <Icons.Mic className="w-4 h-4 md:w-5 md:h-5"/> : <Icons.MicOff className="w-4 h-4 md:w-5 md:h-5"/>}
@@ -1133,7 +1113,7 @@
                                 )}
                             </div>
                             <div className="w-full h-2 md:h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
-                                <div ref={volumeBarRef} className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75" style={{ width: '0%' }}></div>
+                                <div id="lobby-volume-bar" className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75" style={{ width: '0%' }}></div>
                             </div>
                         </div>
                     </div>
@@ -1242,7 +1222,7 @@
                                         <span className="text-emerald-400 font-bold">{currentDetectedNote || '-'}</span>
                                     </div>
                                     <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
-                                        <div ref={volumeBarRef} className="h-full bg-emerald-400 transition-all duration-75" style={{ width: '0%' }}></div>
+                                        <div id="game-volume-bar" className="h-full bg-emerald-400 transition-all duration-75" style={{ width: '0%' }}></div>
                                     </div>
                                 </div>
                             )}
