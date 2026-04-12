@@ -66,6 +66,31 @@
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7qB2N3skJjYa8qsi9ewOfTu-7UjfUzGx9h1O6drZqW84td_hyAlKpHw_TDldViIIEYg/exec';
         const PENALTY_PER_SECOND = 3; 
 
+        // --- 全域音效喚醒機制 (暴力破解 iOS Safari 限制) ---
+        let globalAudioCtx = null;
+        const getGlobalAudioContext = () => {
+            if (!globalAudioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                globalAudioCtx = new AudioContext();
+            }
+            if (globalAudioCtx.state === 'suspended') {
+                globalAudioCtx.resume().catch(() => {});
+            }
+            return globalAudioCtx;
+        };
+
+        const forceWakeAudio = () => {
+            const ctx = getGlobalAudioContext();
+            if (ctx.state === 'suspended') {
+                ctx.resume().catch(() => {});
+            }
+        };
+
+        // 只要玩家碰到螢幕，立刻喚醒音效！繞過 React 的事件包裝
+        window.addEventListener('click', forceWakeAudio, { capture: true });
+        window.addEventListener('touchstart', forceWakeAudio, { capture: true });
+        // --------------------------------------------------
+
         function autoCorrelate(buf, sampleRate) {
             let SIZE = buf.length;
             let r1 = 0, r2 = SIZE - 1, thres = 0.2;
@@ -141,10 +166,6 @@
 
         const playSound = (ctx, type, freq = 440) => {
             if (!ctx) return;
-            if (ctx.state === 'suspended') {
-                ctx.resume().catch(() => {});
-            }
-
             const t = ctx.currentTime;
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
@@ -386,14 +407,12 @@
         const [isSubmitting, setIsSubmitting] = useState(false);
         const [isSubmitted, setIsSubmitted] = useState(false);
 
-        // --- 麥克風相關 State 與 Refs ---
         const [isMicActive, setIsMicActive] = useState(false);
         const [currentDetectedNote, setCurrentDetectedNote] = useState(null); 
         
         const micStreamRef = useRef(null);
         const analyserRef = useRef(null);
         const pitchRafRef = useRef(null);
-        const audioCtxRef = useRef(null);
         
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
@@ -404,29 +423,8 @@
         
         const wasMicActiveRef = useRef(false);
 
-        // 取得 AudioContext (純粹同步，絕不阻塞)
-        const getAudioContext = useCallback(() => {
-            if (!audioCtxRef.current) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                audioCtxRef.current = new AudioContext();
-            }
-            return audioCtxRef.current;
-        }, []);
-
-        useEffect(() => {
-            const unlockAudio = () => {
-                const ctx = audioCtxRef.current;
-                if (ctx && ctx.state === 'suspended') {
-                    ctx.resume().catch(()=>{});
-                }
-            };
-            window.addEventListener('click', unlockAudio, true);
-            window.addEventListener('touchstart', unlockAudio, true);
-            return () => {
-                window.removeEventListener('click', unlockAudio, true);
-                window.removeEventListener('touchstart', unlockAudio, true);
-            };
-        }, []);
+        // 使用唯一的 Float32Array 避免記憶體不斷重置
+        const bufferRef = useRef(new Float32Array(2048));
 
         const stopMic = useCallback(() => {
             if (pitchRafRef.current) cancelAnimationFrame(pitchRafRef.current);
@@ -447,23 +445,20 @@
             lastDetectedNoteRef.current = null;
         }, []);
 
-        // 【最純粹的啟動方式】：移除所有 await 阻礙，確保點擊瞬間觸發麥克風權限
+        // 這次保證 100% 只用你「音準大冒險」的寫法
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
                 return;
             }
             
-            const audioCtx = getAudioContext();
-            // 同步喚醒音效引擎，絕對不用 await 阻擋後續的 getUserMedia
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume().catch(()=>{}); 
-            }
+            // 取得全域的 AudioContext，確保它被點擊喚醒過
+            const audioCtx = getGlobalAudioContext();
 
             try {
-                // 完全比照音準大冒險
+                // 完全比照音準大冒險的設定參數
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
+                    audio: { echoCancellation: false, noiseSuppression: false } 
                 });
                 
                 stream.getTracks()[0].onended = () => {
@@ -474,12 +469,11 @@
                 const source = audioCtx.createMediaStreamSource(stream);
                 
                 const micGainNode = audioCtx.createGain();
-                micGainNode.gain.value = 5.0; 
+                micGainNode.gain.value = 8.0; // 將收音放大，符合音準大冒險預設的靈敏度
                 
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
                 
-                // 只有連到這裡，不接 destination！
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
                 
@@ -492,63 +486,28 @@
             }
         };
 
-        useEffect(() => {
-            const handleVisibilityChange = () => {
-                if (document.hidden) {
-                    if (isMicActive) {
-                        wasMicActiveRef.current = true;
-                        stopMic();
-                    }
-                } else {
-                    const ctx = audioCtxRef.current;
-                    if (ctx && ctx.state === 'suspended') {
-                        ctx.resume().catch(()=>{});
-                    }
-                    if (wasMicActiveRef.current) {
-                        wasMicActiveRef.current = false;
-                        // 回到畫面時自動嘗試重新連線
-                        toggleMic().catch(()=>{});
-                    }
-                }
-            };
-
-            window.addEventListener('visibilitychange', handleVisibilityChange);
-            window.addEventListener('pagehide', stopMic);
-            
-            return () => {
-                window.removeEventListener('visibilitychange', handleVisibilityChange);
-                window.removeEventListener('pagehide', stopMic);
-                stopMic();
-            };
-        }, [isMicActive, stopMic]); 
-
         const detectPitchLoop = (analyser, sampleRate) => {
-            const buffer = new Float32Array(analyser.fftSize);
             const loop = () => {
                 if (!micStreamRef.current) return;
                 
-                if (analyser.getFloatTimeDomainData) {
-                    analyser.getFloatTimeDomainData(buffer);
-                } else {
-                    const dataArray = new Uint8Array(analyser.fftSize);
-                    analyser.getByteTimeDomainData(dataArray);
-                    for (let i = 0; i < analyser.fftSize; i++) {
-                        buffer[i] = (dataArray[i] / 128.0) - 1.0;
-                    }
-                }
+                // 完全比照音準大冒險的抓取方式
+                analyser.getFloatTimeDomainData(bufferRef.current);
 
                 let rms = 0;
-                for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
-                rms = Math.sqrt(rms / buffer.length);
+                for (let i = 0; i < bufferRef.current.length; i++) {
+                    rms += bufferRef.current[i] * bufferRef.current[i];
+                }
+                rms = Math.sqrt(rms / bufferRef.current.length);
                 
+                // 直接更新 DOM，移除 JSX 裡的 style 阻擋
                 const lBar = document.getElementById('lobby-volume-bar');
                 const gBar = document.getElementById('game-volume-bar');
-                const widthStr = Math.min(100, rms * 100 * 5) + '%';
+                const widthStr = Math.min(100, rms * 100 * 8) + '%';
                 if (lBar) lBar.style.width = widthStr;
                 if (gBar) gBar.style.width = widthStr;
                 
                 if (rms > 0.0015) {
-                    const currentFreq = autoCorrelate(buffer, sampleRate);
+                    const currentFreq = autoCorrelate(bufferRef.current, sampleRate);
                     if (currentFreq !== -1) {
                         const note = noteFromPitch(currentFreq);
                         if (note) {
@@ -736,7 +695,7 @@
 
         const toggleIndividualNote = (note) => {
             if (isGameMode || isAssignedModeActive) return;
-            playSound(getAudioContext(), 'note', note.freq);
+            playSound(getGlobalAudioContext(), 'note', note.freq);
             setSelectedNoteIds(prev => prev.includes(note.id) ? prev.filter(id => id !== note.id) : [...prev, note.id]);
         };
 
@@ -836,7 +795,7 @@
                 const newLaser = { id: Date.now(), startX, startY, targetX, targetY };
                 setLasers(prev => [...prev, newLaser]);
                 if (!isMicActive) {
-                    playSound(getAudioContext(), 'laser');
+                    playSound(getGlobalAudioContext(), 'laser');
                 }
 
                 setTimeout(() => setLasers(prev => prev.filter(l => l.id !== newLaser.id)), 300);
@@ -879,9 +838,9 @@
                     fireLaser(currentTarget.uid, targetPitch); 
                     
                     if (source !== 'mic') {
-                        playSound(getAudioContext(), 'note', currentTarget.freq);
+                        playSound(getGlobalAudioContext(), 'note', currentTarget.freq);
                     }
-                    setTimeout(() => { if(source !== 'mic') playSound(getAudioContext(), 'explosion') }, 150);
+                    setTimeout(() => { if(source !== 'mic') playSound(getGlobalAudioContext(), 'explosion') }, 150);
                     
                     const newTargets = [...prevTargets];
                     newTargets[currentTargetIndex] = { ...currentTarget, isExploding: true };
@@ -912,7 +871,7 @@
                         setCombo(0);
                         setStats(s => ({ ...s, wrong: s.wrong + 1 }));
                         setGameScore(s => s - 100); 
-                        playSound(getAudioContext(), 'error'); 
+                        playSound(getGlobalAudioContext(), 'error'); 
                         setWrongShake(true);
                         setTimeout(() => setWrongShake(false), 400);
                     }
@@ -1168,7 +1127,7 @@
                                 )}
                             </div>
                             <div className="w-full h-2 md:h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
-                                <div id="lobby-volume-bar" className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75" style={{ width: '0%' }}></div>
+                                <div id="lobby-volume-bar" className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75"></div>
                             </div>
                             
                             <div className="flex items-center gap-2 mt-1">
@@ -1304,7 +1263,7 @@
                                         <span className="text-emerald-400 font-bold">{currentDetectedNote || '-'}</span>
                                     </div>
                                     <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
-                                        <div id="game-volume-bar" className="h-full bg-emerald-400 transition-all duration-75" style={{ width: '0%' }}></div>
+                                        <div id="game-volume-bar" className="h-full bg-emerald-400 transition-all duration-75"></div>
                                     </div>
                                 </div>
                             )}
