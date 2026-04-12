@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 終極穩定版</title>
+    <title>五線譜音高認知射擊遊戲 - 純淨直笛版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -65,35 +65,6 @@
         const GAME_ID = '音符射擊遊戲';
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7qB2N3skJjYa8qsi9ewOfTu-7UjfUzGx9h1O6drZqW84td_hyAlKpHw_TDldViIIEYg/exec';
         const PENALTY_PER_SECOND = 3; 
-
-        // --- 全域音效喚醒機制 (針對 iOS Safari 休眠問題) ---
-        let globalAudioCtx = null;
-        const getGlobalAudioContext = () => {
-            if (!globalAudioCtx) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                globalAudioCtx = new AudioContext();
-            }
-            if (globalAudioCtx.state === 'suspended') {
-                globalAudioCtx.resume().catch(() => {});
-            }
-            return globalAudioCtx;
-        };
-
-        const forceWakeAudio = () => {
-            const ctx = getGlobalAudioContext();
-            if (ctx.state === 'suspended') {
-                ctx.resume().catch(() => {});
-            }
-        };
-
-        // 綁定所有互動事件，確保一碰到螢幕就解鎖聲音
-        window.addEventListener('click', forceWakeAudio, true);
-        window.addEventListener('touchstart', forceWakeAudio, true);
-        window.addEventListener('keydown', forceWakeAudio, true);
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) forceWakeAudio();
-        });
-        // --------------------------------------------------
 
         function autoCorrelate(buf, sampleRate) {
             let SIZE = buf.length;
@@ -170,7 +141,6 @@
 
         const playSound = (ctx, type, freq = 440) => {
             if (!ctx) return;
-            // 每次播放前檢查並強迫喚醒
             if (ctx.state === 'suspended') {
                 ctx.resume().catch(() => {});
             }
@@ -416,12 +386,14 @@
         const [isSubmitting, setIsSubmitting] = useState(false);
         const [isSubmitted, setIsSubmitted] = useState(false);
 
+        // --- 麥克風相關 State 與 Refs ---
         const [isMicActive, setIsMicActive] = useState(false);
         const [currentDetectedNote, setCurrentDetectedNote] = useState(null); 
         
         const micStreamRef = useRef(null);
         const analyserRef = useRef(null);
         const pitchRafRef = useRef(null);
+        const audioCtxRef = useRef(null);
         
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
@@ -431,6 +403,30 @@
         const targetRefs = useRef({}); 
         
         const wasMicActiveRef = useRef(false);
+
+        // 取得 AudioContext (純粹同步，絕不阻塞)
+        const getAudioContext = useCallback(() => {
+            if (!audioCtxRef.current) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtxRef.current = new AudioContext();
+            }
+            return audioCtxRef.current;
+        }, []);
+
+        useEffect(() => {
+            const unlockAudio = () => {
+                const ctx = audioCtxRef.current;
+                if (ctx && ctx.state === 'suspended') {
+                    ctx.resume().catch(()=>{});
+                }
+            };
+            window.addEventListener('click', unlockAudio, true);
+            window.addEventListener('touchstart', unlockAudio, true);
+            return () => {
+                window.removeEventListener('click', unlockAudio, true);
+                window.removeEventListener('touchstart', unlockAudio, true);
+            };
+        }, []);
 
         const stopMic = useCallback(() => {
             if (pitchRafRef.current) cancelAnimationFrame(pitchRafRef.current);
@@ -451,20 +447,23 @@
             lastDetectedNoteRef.current = null;
         }, []);
 
+        // 【最純粹的啟動方式】：移除所有 await 阻礙，確保點擊瞬間觸發麥克風權限
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
                 return;
             }
             
-            const audioCtx = getGlobalAudioContext();
+            const audioCtx = getAudioContext();
+            // 同步喚醒音效引擎，絕對不用 await 阻擋後續的 getUserMedia
             if (audioCtx.state === 'suspended') {
-                try { await audioCtx.resume(); } catch(e) {}
+                audioCtx.resume().catch(()=>{}); 
             }
 
             try {
+                // 完全比照音準大冒險
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, noiseSuppression: false } 
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
                 });
                 
                 stream.getTracks()[0].onended = () => {
@@ -480,6 +479,7 @@
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
                 
+                // 只有連到這裡，不接 destination！
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
                 
@@ -493,17 +493,21 @@
         };
 
         useEffect(() => {
-            const handleVisibilityChange = async () => {
+            const handleVisibilityChange = () => {
                 if (document.hidden) {
                     if (isMicActive) {
                         wasMicActiveRef.current = true;
                         stopMic();
                     }
                 } else {
-                    forceWakeAudio();
+                    const ctx = audioCtxRef.current;
+                    if (ctx && ctx.state === 'suspended') {
+                        ctx.resume().catch(()=>{});
+                    }
                     if (wasMicActiveRef.current) {
                         wasMicActiveRef.current = false;
-                        toggleMic();
+                        // 回到畫面時自動嘗試重新連線
+                        toggleMic().catch(()=>{});
                     }
                 }
             };
@@ -732,7 +736,7 @@
 
         const toggleIndividualNote = (note) => {
             if (isGameMode || isAssignedModeActive) return;
-            playSound(getGlobalAudioContext(), 'note', note.freq);
+            playSound(getAudioContext(), 'note', note.freq);
             setSelectedNoteIds(prev => prev.includes(note.id) ? prev.filter(id => id !== note.id) : [...prev, note.id]);
         };
 
@@ -832,7 +836,7 @@
                 const newLaser = { id: Date.now(), startX, startY, targetX, targetY };
                 setLasers(prev => [...prev, newLaser]);
                 if (!isMicActive) {
-                    playSound(getGlobalAudioContext(), 'laser');
+                    playSound(getAudioContext(), 'laser');
                 }
 
                 setTimeout(() => setLasers(prev => prev.filter(l => l.id !== newLaser.id)), 300);
@@ -875,9 +879,9 @@
                     fireLaser(currentTarget.uid, targetPitch); 
                     
                     if (source !== 'mic') {
-                        playSound(getGlobalAudioContext(), 'note', currentTarget.freq);
+                        playSound(getAudioContext(), 'note', currentTarget.freq);
                     }
-                    setTimeout(() => { if(source !== 'mic') playSound(getGlobalAudioContext(), 'explosion') }, 150);
+                    setTimeout(() => { if(source !== 'mic') playSound(getAudioContext(), 'explosion') }, 150);
                     
                     const newTargets = [...prevTargets];
                     newTargets[currentTargetIndex] = { ...currentTarget, isExploding: true };
@@ -908,7 +912,7 @@
                         setCombo(0);
                         setStats(s => ({ ...s, wrong: s.wrong + 1 }));
                         setGameScore(s => s - 100); 
-                        playSound(getGlobalAudioContext(), 'error'); 
+                        playSound(getAudioContext(), 'error'); 
                         setWrongShake(true);
                         setTimeout(() => setWrongShake(false), 400);
                     }
