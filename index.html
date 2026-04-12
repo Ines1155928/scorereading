@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>五線譜音高認知射擊遊戲 - 直笛專屬版</title>
+    <title>五線譜音高認知射擊遊戲 - 純淨直笛版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -365,7 +365,7 @@
         const [selectedNoteIds, setSelectedNoteIds] = useState([]);
         const [isGameMode, setIsGameMode] = useState(false);
         const [showKeyboardHints, setShowKeyboardHints] = useState(false);
-        const [isRecorderMode, setIsRecorderMode] = useState(false); // 【新增狀態】直笛模式開關
+        const [isRecorderMode, setIsRecorderMode] = useState(false); 
         
         const [combo, setCombo] = useState(0);
         const [maxCombo, setMaxCombo] = useState(0);
@@ -383,7 +383,6 @@
         const [isSubmitting, setIsSubmitting] = useState(false);
         const [isSubmitted, setIsSubmitted] = useState(false);
 
-        // --- 麥克風相關 State 與 Refs ---
         const [isMicActive, setIsMicActive] = useState(false);
         const [currentDetectedNote, setCurrentDetectedNote] = useState(null); 
         
@@ -391,7 +390,6 @@
         const analyserRef = useRef(null);
         const pitchRafRef = useRef(null);
         const audioCtxRef = useRef(null);
-        const keepAliveOscRef = useRef(null); 
         
         const matchFramesRef = useRef(0);
         const lastDetectedNoteRef = useRef(null);
@@ -399,9 +397,8 @@
         const timerRef = useRef(null);
         const startTimeRef = useRef(0);
         const targetRefs = useRef({}); 
-        
-        const wasMicActiveRef = useRef(false);
 
+        // 取得或初始化 AudioContext
         const getAudioContext = useCallback(() => {
             if (!audioCtxRef.current) {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -431,12 +428,6 @@
                 micStreamRef.current.getTracks().forEach(track => track.stop());
                 micStreamRef.current = null;
             }
-            
-            if (keepAliveOscRef.current) {
-                try { keepAliveOscRef.current.stop(); } catch(e) {}
-                keepAliveOscRef.current.disconnect();
-                keepAliveOscRef.current = null;
-            }
 
             setIsMicActive(false);
             setCurrentDetectedNote(null);
@@ -450,6 +441,7 @@
             lastDetectedNoteRef.current = null;
         }, []);
 
+        // 【最終還原修正】：完全拷貝音準大冒險的連線邏輯，絕對不接喇叭
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
@@ -462,16 +454,7 @@
             }
 
             try {
-                const keepAliveOsc = audioCtx.createOscillator();
-                const keepAliveGain = audioCtx.createGain();
-                keepAliveGain.gain.value = 0.001; 
-                keepAliveOsc.connect(keepAliveGain);
-                keepAliveGain.connect(audioCtx.destination);
-                keepAliveOsc.start();
-                keepAliveOscRef.current = keepAliveOsc;
-            } catch(e) {}
-
-            try {
+                // 完全比照音準大冒險
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { echoCancellation: false, noiseSuppression: false } 
                 });
@@ -489,6 +472,7 @@
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
                 
+                // 只有連到這裡，不接 destination！
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
                 
@@ -501,49 +485,13 @@
             }
         };
 
-        useEffect(() => {
-            const handleVisibilityChange = async () => {
-                if (document.hidden) {
-                    if (isMicActive) {
-                        wasMicActiveRef.current = true;
-                        stopMic();
-                    }
-                } else {
-                    const ctx = audioCtxRef.current;
-                    if (ctx && ctx.state === 'suspended') {
-                        try { await ctx.resume(); } catch(e) {}
-                    }
-                    if (wasMicActiveRef.current) {
-                        wasMicActiveRef.current = false;
-                        toggleMic();
-                    }
-                }
-            };
-
-            window.addEventListener('visibilitychange', handleVisibilityChange);
-            window.addEventListener('pagehide', stopMic);
-            
-            return () => {
-                window.removeEventListener('visibilitychange', handleVisibilityChange);
-                window.removeEventListener('pagehide', stopMic);
-                stopMic();
-            };
-        }, [isMicActive, stopMic]); 
-
         const detectPitchLoop = (analyser, sampleRate) => {
             const buffer = new Float32Array(analyser.fftSize);
             const loop = () => {
                 if (!micStreamRef.current) return;
                 
-                if (analyser.getFloatTimeDomainData) {
-                    analyser.getFloatTimeDomainData(buffer);
-                } else {
-                    const dataArray = new Uint8Array(analyser.fftSize);
-                    analyser.getByteTimeDomainData(dataArray);
-                    for (let i = 0; i < analyser.fftSize; i++) {
-                        buffer[i] = (dataArray[i] / 128.0) - 1.0;
-                    }
-                }
+                // 完全比照音準大冒險的抓取方式
+                analyser.getFloatTimeDomainData(buffer);
 
                 let rms = 0;
                 for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
@@ -851,7 +799,7 @@
             } catch (e) {}
         };
 
-        // 【新增核心邏輯】：加入 isRecorderMode 判斷條件
+        // 嚴格音準與直笛判斷
         const processInput = useCallback((inputPitch, source) => {
             setGameTargets(prevTargets => {
                 const currentTarget = prevTargets[currentTargetIndex];
@@ -868,14 +816,11 @@
                     const inputOct = parseInt(inputPitch.replace(/[^0-9]/g, ''), 10);
                     
                     if (isRecorderMode) {
-                        // 勾選時：要求音準自動高八度
                         isMatch = (inputBase === targetBase) && (inputOct === targetOct + 1);
                     } else {
-                        // 沒勾選時：要求絕對正確音高
                         isMatch = (inputPitch === targetPitch);
                     }
                 } else {
-                    // 鍵盤點擊必須完全一致
                     isMatch = (inputPitch === targetPitch);
                 }
 
@@ -931,7 +876,7 @@
                     return prevTargets;
                 }
             });
-        }, [currentTargetIndex, gameTargets.length, combo, isMicActive, isRecorderMode]); // 加入 isRecorderMode 依賴
+        }, [currentTargetIndex, gameTargets.length, combo, isMicActive, isRecorderMode]); 
 
         const handleNoteInput = (inputPitch) => {
             if (!isGameMode) return;
@@ -1183,7 +1128,6 @@
                                 <div id="lobby-volume-bar" className="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-75" style={{ width: '0%' }}></div>
                             </div>
                             
-                            {/* 【新增】直笛模式勾選框 */}
                             <div className="flex items-center gap-2 mt-1">
                                 <input 
                                     type="checkbox" 
@@ -1305,7 +1249,6 @@
                                     <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700/50">
                                         <div id="game-volume-bar" className="h-full bg-emerald-400 transition-all duration-75" style={{ width: '0%' }}></div>
                                     </div>
-                                    {/* 【提示】若在遊戲中開啟直笛模式，給予綠色小提示 */}
                                     {isRecorderMode && (
                                         <div className="text-[8px] md:text-[9px] text-emerald-300 font-zh text-right mt-0.5">
                                             直笛模式ON
@@ -1332,7 +1275,6 @@
                         <div className="w-full max-w-6xl mx-auto h-full flex relative shadow-2xl rounded-b-xl">
                             <div className="absolute top-0 left-0 right-0 h-3 md:h-4 bg-red-800 rounded-t-sm z-0"></div>
                             {dynamicKeys.map((k, index) => {
-                                // 【高音直笛特化】：讓虛擬鍵盤在接收到高八度直笛音時，也能亮起對應的目標按鍵
                                 const isMicHighlight = isMicActive && currentDetectedNote && (
                                     isRecorderMode 
                                     ? (currentDetectedNote.replace(/[0-9]/g, '') === k.name && parseInt(currentDetectedNote.replace(/[^0-9]/g, ''), 10) - 1 === parseInt(k.pitch.replace(/[^0-9]/g, ''), 10))
