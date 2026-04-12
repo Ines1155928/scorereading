@@ -12,20 +12,19 @@
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Noto+Sans+TC:wght@400;700&display=swap');
-        
         html, body { 
             position: fixed; 
-            inset: 0; 
+            inset: 0;
             width: 100%; 
             height: 100%; 
             margin: 0; 
             padding: 0; 
             overflow: hidden; 
             background: #020617; 
-            touch-action: none; 
+            touch-action: none;
         }
         #root { 
-            position: absolute; 
+            position: absolute;
             inset: 0; 
             display: flex; 
             flex-direction: column; 
@@ -63,14 +62,12 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
-
         const GAME_ID = '音符射擊遊戲';
-        // 👇 這邊記得維持你的 Google 部署網址喔！
+        //  這邊記得維持你的 Google 部署網址喔！
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7qB2N3skJjYa8qsi9ewOfTu-7UjfUzGx9h1O6drZqW84td_hyAlKpHw_TDldViIIEYg/exec';
-        
         const PENALTY_PER_SECOND = 3; 
 
-        // 🌟 完全移植自音準大冒險的核心演算法 [cite: 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324]
+        //  完全移植自音準大冒險的核心演算法 
         function autoCorrelate(buf, sampleRate) {
             let SIZE = buf.length;
             let r1 = 0, r2 = SIZE - 1, thres = 0.2;
@@ -79,15 +76,13 @@
 
             buf = buf.slice(r1, r2);
             SIZE = buf.length;
-
             let c = new Array(SIZE).fill(0);
             for (let i = 0; i < SIZE; i++) for (let j = 0; j < SIZE - i; j++) c[i] = c[i] + buf[j] * buf[j + i];
-            
             let d = 0; while (c[d] > c[d + 1]) d++;
             let maxval = -1, maxpos = -1;
             for (let i = d; i < SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
             
-            let clarity = maxval / (c[0] || 1); 
+            let clarity = maxval / (c[0] || 1);
             if (clarity < 0.5) { return -1; }
 
             let T0 = maxpos;
@@ -107,7 +102,6 @@
             const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
             const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
             const midiNote = Math.round(noteNum) + 69;
-            
             if (Number.isNaN(midiNote) || midiNote < 0 || midiNote > 127) return null;
             
             const octave = Math.floor(midiNote / 12) - 1;
@@ -137,7 +131,6 @@
             Mic: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>,
             MicOff: ({ className }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
         };
-
         const NOTE_COLORS = {
             'C': { bg: 'bg-gradient-to-br from-red-900/50 to-red-950/50', border: 'border-red-400', shadow: 'shadow-[0_0_15px_rgba(248,113,113,0.4)]', labelBg: 'bg-red-500', hex: '#f87171' },
             'D': { bg: 'bg-gradient-to-br from-orange-900/50 to-orange-950/50', border: 'border-orange-400', shadow: 'shadow-[0_0_15px_rgba(251,146,60,0.4)]', labelBg: 'bg-orange-500', hex: '#fb923c' },
@@ -147,7 +140,6 @@
             'A': { bg: 'bg-gradient-to-br from-blue-900/50 to-blue-950/50', border: 'border-blue-400', shadow: 'shadow-[0_0_15px_rgba(96,165,250,0.4)]', labelBg: 'bg-blue-500', hex: '#60a5fa' },
             'B': { bg: 'bg-gradient-to-br from-fuchsia-900/50 to-fuchsia-950/50', border: 'border-fuchsia-400', shadow: 'shadow-[0_0_15px_rgba(232,121,249,0.4)]', labelBg: 'bg-fuchsia-500', hex: '#e879f9' }
         };
-
         const playSound = (ctx, type, freq = 440) => {
             if (!ctx) return;
             const t = ctx.currentTime;
@@ -156,7 +148,6 @@
             
             osc.connect(gain);
             gain.connect(ctx.destination);
-
             if (type === 'laser') {
                 osc.type = 'sawtooth';
                 osc.frequency.setValueAtTime(880, t);
@@ -210,7 +201,7 @@
         treble_high: [
             { id: 't_C5', name: 'C', solfege: 'Do', freq: 523.25, y: 50, clef: 'treble' },  
             { id: 't_D5', name: 'D', solfege: 'Re', freq: 587.33, y: 40, clef: 'treble' },  
-            { id: 't_E5', name: 'E', solfege: 'Mi', freq: 659.25, y: 30, clef: 'treble' },  
+            { id: 't_E5', name: 'E', solfege: 'Mi', freq: 659.25, y: 30, clef: 'treble' }, 
             { id: 't_F5', name: 'F', solfege: 'Fa', freq: 698.46, y: 20, clef: 'treble' },  
             { id: 't_G5', name: 'G', solfege: 'Sol', freq: 783.99, y: 10, clef: 'treble' },  
             { id: 't_A5', name: 'A', solfege: 'La', freq: 880.00, y: 0,  clef: 'treble' },   
@@ -271,24 +262,21 @@
         };
 
         const SOLFEGE_MAP = { C: 'Do', D: 'Re', E: 'Mi', F: 'Fa', G: 'Sol', A: 'La', B: 'Si' };
-
         const TREBLE_RANGES = [
             { id: 'treble_mid', label: '中音域' },
             { id: 'treble_high', label: '高音域' },
             { id: 'treble_lines', label: '線上的音' },
             { id: 'treble_spaces', label: '間的音' }
         ];
-
         const BASS_RANGES = [
             { id: 'bass_low', label: '更低音域' },
             { id: 'bass_high', label: '低音域' },
             { id: 'bass_lines', label: '線上的音' },
             { id: 'bass_spaces', label: '間的音' }
         ];
-
         const ALL_TREBLE = Object.values(NOTE_DATABASE).filter((_, i) => Object.keys(NOTE_DATABASE)[i].startsWith('treble')).flat().filter((v, i, a) => a.findIndex(t => t.id === v.id) === i).sort((a, b) => a.freq - b.freq);
         const ALL_BASS = Object.values(NOTE_DATABASE).filter((_, i) => Object.keys(NOTE_DATABASE)[i].startsWith('bass')).flat().filter((v, i, a) => a.findIndex(t => t.id === v.id) === i).sort((a, b) => a.freq - b.freq);
-
+        
         const StarField = () => {
             const stars = useMemo(() => Array.from({ length: 40 }).map((_, i) => ({
                 id: i, x: Math.random() * 100, y: Math.random() * 100,
@@ -330,9 +318,9 @@
                         ))}
                         
                         {isBass ? (
-                            <text x="12" y="92" fontSize="105" fill="rgba(255,255,255,0.5)" fontFamily="serif" fontWeight="bold">𝄢</text>
+                            <text x="12" y="92" fontSize="105" fill="rgba(255,255,255,0.5)" fontFamily="serif" fontWeight="bold"></text>
                         ) : (
-                            <text x="5" y="95" fontSize="120" fill="rgba(255,255,255,0.4)" fontFamily="serif">𝄞</text>
+                            <text x="5" y="95" fontSize="120" fill="rgba(255,255,255,0.4)" fontFamily="serif"></text>
                         )}
 
                         {note.y >= 120 && <line x1={noteX - 18} y1="120" x2={noteX + 18} y2="120" stroke="white" strokeWidth="3" />}
@@ -361,12 +349,10 @@
             isLoggedIn: false,
             name: ''
         });
-
         const [isInitialLoading, setIsInitialLoading] = useState(true);
         const [isRefreshing, setIsRefreshing] = useState(false);
         const [assignedNotesData, setAssignedNotesData] = useState([]);
         const [differentiatedAssignments, setDifferentiatedAssignments] = useState({});
-        
         const [leaderboardAllTime, setLeaderboardAllTime] = useState([]);
         const [leaderboardToday, setLeaderboardToday] = useState([]);
         const [leaderboardType, setLeaderboardType] = useState('today'); 
@@ -377,7 +363,6 @@
         const [selectedClefTab, setSelectedClefTab] = useState('treble'); 
         const [currentLevel, setCurrentLevel] = useState('treble_mid'); 
         const [selectedNoteIds, setSelectedNoteIds] = useState([]);
-        
         const [isGameMode, setIsGameMode] = useState(false);
         const [showKeyboardHints, setShowKeyboardHints] = useState(false);
         
@@ -386,7 +371,7 @@
         const [stats, setStats] = useState({ correct: 0, wrong: 0 });
 
         const [gameTargets, setGameTargets] = useState([]);
-        const [currentTargetIndex, setCurrentTargetIndex] = useState(0); 
+        const [currentTargetIndex, setCurrentTargetIndex] = useState(0);
         const [gameScore, setGameScore] = useState(0);
         const [gameTime, setGameTime] = useState(0);
         const [gameWon, setGameWon] = useState(false);
@@ -413,8 +398,22 @@
         const timerRef = useRef(null);
         const startTimeRef = useRef(0);
         const targetRefs = useRef({}); 
+        
+        // NEW REF：記錄離開網頁前的麥克風狀態
+        const wasMicActiveRef = useRef(false);
 
-        // 🌟 確保元件卸載或分頁關閉時，釋放麥克風資源
+        const getAudioContext = useCallback(() => {
+            if (!audioCtxRef.current) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtxRef.current = new AudioContext();
+            }
+            if (audioCtxRef.current.state === 'suspended') {
+                audioCtxRef.current.resume();
+            }
+            return audioCtxRef.current;
+        }, []);
+
+        //  確保元件卸載或分頁關閉時，釋放麥克風資源
         const stopMic = useCallback(() => {
             if (pitchRafRef.current) cancelAnimationFrame(pitchRafRef.current);
             if (micStreamRef.current) {
@@ -428,44 +427,20 @@
             lastDetectedNoteRef.current = null;
         }, []);
 
-        useEffect(() => {
-            const handleVisibilityChange = () => {
-                if (document.hidden && isMicActive) stopMic();
-            };
-            window.addEventListener('visibilitychange', handleVisibilityChange);
-            window.addEventListener('pagehide', stopMic);
-            return () => {
-                window.removeEventListener('visibilitychange', handleVisibilityChange);
-                window.removeEventListener('pagehide', stopMic);
-                stopMic();
-            };
-        }, [isMicActive, stopMic]);
-
-        // 🌟 核心修復 1：安全可靠的 AudioContext 建立與喚醒
+        //  核心修復 1：安全可靠的 AudioContext 建立與喚醒
         const toggleMic = async () => {
             if (isMicActive) {
                 stopMic();
                 return;
             }
             
-            let audioCtx = audioCtxRef.current;
-            if (!audioCtx) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                audioCtx = new AudioContext();
-                audioCtxRef.current = audioCtx;
-            }
-            
-            // Safari 規定必須在點擊瞬間強制喚醒
-            if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
-            }
+            let audioCtx = getAudioContext();
 
             try {
                 // 取消所有降噪，確保樂器原音進入
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } 
                 });
-                
                 // 監聽系統是否強制關閉麥克風
                 stream.getTracks()[0].onended = () => {
                     console.log("麥克風連線被系統中斷");
@@ -475,14 +450,13 @@
                 micStreamRef.current = stream;
                 const source = audioCtx.createMediaStreamSource(stream);
                 
-                // 🌟 核心修復 2：加裝放大器節點，靈敏度放大 5 倍
+                //  核心修復 2：加裝放大器節點，靈敏度放大 5 倍
                 const micGainNode = audioCtx.createGain();
                 micGainNode.gain.value = 5.0; 
                 
                 const analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
-                
-                // 💡 關鍵：只連到分析器，【絕對不要】連到 audioCtx.destination，否則 Safari 幾秒後會切斷！[cite: 280, 281]
+                //  關鍵：只連到分析器，【絕對不要】連到 audioCtx.destination，否則 Safari 幾秒後會切斷！
                 source.connect(micGainNode);
                 micGainNode.connect(analyser);
                 
@@ -495,12 +469,48 @@
             }
         };
 
+        // 修改的 useEffect：自動喚醒音效及恢復麥克風
+        useEffect(() => {
+            const handleVisibilityChange = async () => {
+                if (document.hidden) {
+                    // 網頁被隱藏時：若麥克風開著，先記錄下來並關閉以節省資源
+                    if (isMicActive) {
+                        wasMicActiveRef.current = true;
+                        stopMic();
+                    }
+                } else {
+                    // 網頁重新顯示時：
+                    // 1. 強制喚醒遊戲音效引擎 (解決雷射、爆炸聲消失的問題)
+                    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+                        try {
+                            await audioCtxRef.current.resume();
+                        } catch (e) {
+                            console.warn("無法自動喚醒音效，需要使用者再次互動", e);
+                        }
+                    }
+                    
+                    // 2. 如果玩家離開前麥克風是開的，嘗試自動重啟麥克風
+                    if (wasMicActiveRef.current) {
+                        wasMicActiveRef.current = false;
+                        toggleMic();
+                    }
+                }
+            };
+
+            window.addEventListener('visibilitychange', handleVisibilityChange);
+            window.addEventListener('pagehide', stopMic);
+            
+            return () => {
+                window.removeEventListener('visibilitychange', handleVisibilityChange);
+                window.removeEventListener('pagehide', stopMic);
+                stopMic();
+            };
+        }, [isMicActive, stopMic]); // 確保能正確拿到最新 state
+
         const detectPitchLoop = (analyser, sampleRate) => {
             const buffer = new Float32Array(analyser.fftSize);
-            
             const loop = () => {
                 if (!micStreamRef.current) return;
-                
                 if (analyser.getFloatTimeDomainData) {
                     analyser.getFloatTimeDomainData(buffer);
                 } else {
@@ -514,7 +524,6 @@
                 let rms = 0;
                 for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
                 rms = Math.sqrt(rms / buffer.length);
-                
                 if (volumeBarRef.current) {
                     // 音量視覺回饋放大顯示
                     volumeBarRef.current.style.width = Math.min(100, rms * 100 * 5) + '%';
@@ -523,13 +532,11 @@
                 // 聲音夠大才開始算音準
                 if (rms > 0.0015) {
                     const currentFreq = autoCorrelate(buffer, sampleRate);
-                    
                     if (currentFreq !== -1) {
                         const note = noteFromPitch(currentFreq);
                         if (note) {
                             setCurrentDetectedNote(note);
-                            
-                            // 🌟 核心修復 3：連續發射機制
+                            //  核心修復 3：連續發射機制
                             if (lastDetectedNoteRef.current === note) {
                                 matchFramesRef.current++;
                             } else {
@@ -538,7 +545,6 @@
                             }
                             
                             // 只要連續抓到同一個音超過 4 次 (約 60 毫秒)，並且每 4 次就發送一次開火訊號！
-                            // 這樣只要你一直長唱/長吹，它就會像機關槍一樣一直幫你過關！
                             if (matchFramesRef.current >= 4 && matchFramesRef.current % 4 === 0) {
                                 window.dispatchEvent(new CustomEvent('micNoteDetected', { detail: note }));
                             }
@@ -577,7 +583,6 @@
                 setLeaderboardToday(data.todayLeaderboard || []);
                 setAssignedNotesData(data.assignedNotes || []);
                 setDifferentiatedAssignments(data.differentiatedAssignments || {});
-                
             } catch (err) {
                 console.error("無法取得後台資料", err);
             } finally {
@@ -661,11 +666,9 @@
             const active = [...ALL_TREBLE, ...ALL_BASS]
                 .filter(n => selectedNoteIds.includes(n.id))
                 .sort((a, b) => a.freq - b.freq);
-            
             if(active.length === 0) return '無';
             
             const formatNote = (n) => `${n.name}${n.id.match(/\d/)[0]} (${SOLFEGE_MAP[n.name]})`;
-            
             if (active.length <= 7) {
                 return active.map(n => formatNote(n)).join('、');
             }
@@ -695,7 +698,6 @@
                         time: Number(gameTime)
                     })
                 });
-                
                 setIsSubmitted(true);
                 await fetchLeaderboardData(false);                 
             } catch (err) {
@@ -760,13 +762,11 @@
             setIsSubmitted(false); 
             
             const activeNotes = [...ALL_TREBLE, ...ALL_BASS].filter(n => selectedNoteIds.includes(n.id));
-            
             const TOTAL_QUESTIONS = 15; 
             let pool = [];
 
             const fullSets = Math.floor(TOTAL_QUESTIONS / activeNotes.length);
             const remainder = TOTAL_QUESTIONS % activeNotes.length;
-
             for (let i = 0; i < fullSets; i++) {
                 pool.push(...activeNotes);
             }
@@ -799,11 +799,10 @@
                 uid: `${note.id}-${index}-${Date.now()}`,
                 isExploding: false
             }));
-            
             setGameTargets(targets);
             if (timerRef.current) clearInterval(timerRef.current);
             const start = Date.now();
-            startTimeRef.current = start; 
+            startTimeRef.current = start;
             timerRef.current = setInterval(() => setGameTime(((Date.now() - start) / 1000).toFixed(2)), 50);
         };
 
@@ -816,13 +815,11 @@
                 const targetRect = targetEl.getBoundingClientRect();
                 const keyRect = keyEl.getBoundingClientRect();
                 const startX = keyRect.left + keyRect.width / 2;
-                const startY = keyRect.top; 
+                const startY = keyRect.top;
                 const targetX = targetRect.left + targetRect.width / 2;
                 const targetY = targetRect.top + targetRect.height / 2;
-
                 const newLaser = { id: Date.now(), startX, startY, targetX, targetY };
                 setLasers(prev => [...prev, newLaser]);
-                
                 if (!isMicActive) {
                     playSound(getAudioContext(), 'laser');
                 }
@@ -834,11 +831,9 @@
         const processInput = useCallback((inputPitch, source) => {
             setGameTargets(prevTargets => {
                 const currentTarget = prevTargets[currentTargetIndex];
-                // 防呆：如果這個目標已經在爆炸動畫中，就不要再重複計算了
                 if (!currentTarget || currentTarget.isExploding) return prevTargets;
 
                 const targetPitch = currentTarget.id.split('_')[1]; 
-                
                 const targetBaseNote = targetPitch.replace(/[0-9]/g, ''); 
                 const inputBaseNote = inputPitch.replace(/[0-9]/g, '');   
 
@@ -859,10 +854,10 @@
                         playSound(getAudioContext(), 'note', currentTarget.freq);
                     }
                     setTimeout(() => { if(source !== 'mic') playSound(getAudioContext(), 'explosion') }, 150);
-
+                    
                     const newTargets = [...prevTargets];
                     newTargets[currentTargetIndex] = { ...currentTarget, isExploding: true };
-
+                    
                     setTimeout(() => {
                         setCurrentTargetIndex(prev => {
                             if (prev + 1 < gameTargets.length) {
@@ -881,6 +876,7 @@
                             }
                         });
                     }, 500);
+                    
                     return newTargets;
 
                 } else {
@@ -889,7 +885,7 @@
                         setStats(s => ({ ...s, wrong: s.wrong + 1 }));
                         setGameScore(s => s - 100); 
                         playSound(getAudioContext(), 'error'); 
-                        setWrongShake(true); 
+                        setWrongShake(true);
                         setTimeout(() => setWrongShake(false), 400);
                     }
                     return prevTargets;
@@ -909,7 +905,6 @@
             window.addEventListener('micNoteDetected', handleMicNote);
             return () => window.removeEventListener('micNoteDetected', handleMicNote);
         }, [isGameMode, processInput]);
-
 
         const currentNoteObj = gameTargets[currentTargetIndex];
 
@@ -953,8 +948,8 @@
         const currentBoard = currentActiveDatabase.filter(e => 
             activeLeaderboardTab === '全校' ? true : e.playerClass === activeLeaderboardTab
         );
-
-       const leaderboardModal = showLeaderboard && (
+        
+        const leaderboardModal = showLeaderboard && (
             <div className="absolute inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 md:p-4 animate-pop">
                 <div className="bg-slate-900 border-2 border-yellow-500/50 rounded-2xl w-full max-w-md max-h-[95vh] flex flex-col shadow-[0_0_50px_rgba(234,179,8,0.2)]">
                     <div className="p-3 border-b border-white/10 flex justify-between items-center bg-slate-800/50 rounded-t-2xl shrink-0">
@@ -988,7 +983,7 @@
                                 onClick={() => setActiveLeaderboardTab(tab)}
                                 className={`px-4 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap transition-colors font-zh border ${activeLeaderboardTab === tab ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50' : 'bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700'}`}
                             >
-                                {tab === '全校' ? '🏆 總排行' : tab}
+                                {tab === '全校' ? '總排行' : tab}
                             </button>
                         ))}
                     </div>
@@ -1009,18 +1004,17 @@
                                             </div>
                                             <div className="flex flex-col">
                                                 <span className="font-bold text-white text-lg md:text-xl font-zh">
-                                                    {entry.name}
+                                                {entry.name}
                                                 </span>
-                                                <span className="text-[10px] md:text-xs text-slate-400 font-zh truncate max-w-[120px] md:max-w-[160px]" title={entry.range}>{entry.range}</span>
+                                            <span className="text-[10px] md:text-xs text-slate-400 font-zh truncate max-w-[120px] md:max-w-[160px]" title={entry.range}>{entry.range}</span>
                                             </div>
                                         </div>
-                                        
                                         <div className="flex flex-col items-end text-right">
                                             <span className={`font-black text-3xl md:text-4xl font-mono tracking-wider leading-none mb-1 ${idx === 0 ? 'text-yellow-400 drop-shadow-md' : 'text-cyan-300'}`}>
                                                 {entry.time ? `${Number(entry.time).toFixed(2)}s` : '-'}
                                             </span>
                                             <span className="text-[11px] md:text-xs text-emerald-400 font-zh font-semibold">
-                                                總分 {entry.score} | 準確率 {entry.accuracy}% | 連擊 {entry.maxCombo}
+                                            總分 {entry.score} | 準確率 {entry.accuracy}% | 連擊 {entry.maxCombo}
                                             </span>
                                         </div>
                                     </div>
@@ -1047,11 +1041,9 @@
                 <div className="w-full h-full relative overflow-hidden text-white font-kids music-space-bg flex flex-col items-center justify-center p-4">
                     <StarField />
                     {leaderboardModal}
-                    
                     <div className="bg-slate-900/90 border-2 border-cyan-500/50 rounded-3xl p-6 md:p-8 max-w-sm w-full shadow-[0_0_40px_rgba(34,211,238,0.2)] z-10 backdrop-blur-md animate-pop">
                         <Icons.Music className="w-12 h-12 text-cyan-400 mx-auto mb-4" />
                         <h2 className="text-2xl font-bold text-white text-center mb-6 font-zh">歡迎來到音符挑戰</h2>
-
                         <div className="flex flex-col gap-4 animate-pop">
                             <div>
                                 <label className="text-xs text-cyan-300 font-bold mb-1.5 block font-zh">請輸入你的玩家名稱</label>
@@ -1069,7 +1061,8 @@
                             onClick={() => {
                                 let finalName = loginState.name.trim();
                                 if (!finalName) {
-                                    alert("請輸入名稱！"); return;
+                                    alert("請輸入名稱！");
+                                    return;
                                 }
                                 setLoginState({ isLoggedIn: true, name: finalName });
                             }}
@@ -1090,7 +1083,6 @@
 
         let startBtnText = "開始測驗";
         if (validationShake) startBtnText = "至少選擇 2 個音符！";
-
         return (
             <div className="w-full h-full relative overflow-hidden text-white font-kids music-space-bg flex flex-col">
             <StarField />
@@ -1131,7 +1123,7 @@
                         </h1>
                     </div>
 
-                    {/* 🌟 全新麥克風控制面板 (永遠顯示音量條) 🌟 */}
+                    {/* 全新麥克風控制面板 (永遠顯示音量條)  */}
                     <div className="absolute right-2 top-14 md:right-4 md:top-16 z-50 flex flex-col items-end gap-2 w-44 md:w-56">
                         <button onClick={toggleMic} className={`w-full py-2 md:py-2.5 rounded-xl font-bold text-xs md:text-sm font-zh border flex justify-center items-center gap-2 transition-all shadow-md ${isMicActive ? 'bg-emerald-500 text-white border-emerald-400 mic-active-pulse' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 hover:text-white'}`}>
                             {isMicActive ? <Icons.Mic className="w-4 h-4 md:w-5 md:h-5"/> : <Icons.MicOff className="w-4 h-4 md:w-5 md:h-5"/>}
@@ -1154,8 +1146,8 @@
                     </div>
 
                     <div className={`flex gap-2 mb-0 mt-4 ${isAssignedModeActive ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <button onClick={() => handleClefChange('treble')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-sm md:text-base font-zh transition-all shadow-md ${selectedClefTab === 'treble' && currentLevel !== 'infinite' ? 'bg-fuchsia-600 text-white shadow-[0_0_15px_rgba(217,70,239,0.5)]' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}>高音譜 𝄞</button>
-                        <button onClick={() => handleClefChange('bass')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-sm md:text-base font-zh transition-all shadow-md ${selectedClefTab === 'bass' && currentLevel !== 'infinite' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}>低音譜 𝄢</button>
+                        <button onClick={() => handleClefChange('treble')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-sm md:text-base font-zh transition-all shadow-md ${selectedClefTab === 'treble' && currentLevel !== 'infinite' ? 'bg-fuchsia-600 text-white shadow-[0_0_15px_rgba(217,70,239,0.5)]' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}>高音譜 </button>
+                        <button onClick={() => handleClefChange('bass')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-sm md:text-base font-zh transition-all shadow-md ${selectedClefTab === 'bass' && currentLevel !== 'infinite' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}>低音譜 </button>
                         <button onClick={() => handleClefChange('infinite')} className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-xs md:text-sm font-zh flex items-center gap-1 transition-all shadow-md ${currentLevel === 'infinite' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}><Icons.Zap className="w-3 h-3" /> 檢視全部</button>
                     </div>
 
@@ -1205,7 +1197,7 @@
                         
                         <div className="w-full max-w-5xl flex flex-col md:flex-row justify-between items-center mb-3 px-2 border-b border-white/10 pb-3 gap-2">
                             <span className="text-yellow-400 font-bold font-zh bg-black/40 px-4 py-2 rounded-lg border border-yellow-500/50 text-[11px] md:text-sm">
-                                🎯 {isAssignedModeActive ? '指定題庫' : '已選題庫'}：{selectedNoteIds.length} 個音符
+                                 {isAssignedModeActive ? '指定題庫' : '已選題庫'}：{selectedNoteIds.length} 個音符
                             </span>
                             <div className={`flex gap-2 flex-wrap justify-center ${isAssignedModeActive ? 'hidden' : ''}`}>
                                 <button onClick={selectAllCurrentLevel} className="px-3 py-1.5 bg-blue-600/30 text-blue-200 rounded-lg font-bold font-zh border border-blue-500/30 text-[11px] flex items-center"><Icons.CheckCircle2 className="w-3.5 h-3.5 mr-1"/> 全選</button>
@@ -1219,7 +1211,7 @@
                         </div>
                         <div className="sticky bottom-6 md:bottom-8 z-50 flex justify-center w-full max-w-xs md:max-w-sm mx-auto mt-auto pointer-events-none pb-2">
                             <button onClick={startGame} className={`pointer-events-auto w-full h-14 md:h-16 text-base md:text-xl rounded-full font-bold transition-all flex items-center justify-center gap-2 font-zh shadow-[0_15px_40px_rgba(0,0,0,0.8)]
-                                ${validationShake ? 'bg-red-500 text-white shake-error' : 'bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 border border-fuchsia-400/50 text-white hover:-translate-y-1 active:translate-y-1 active:scale-95'}
+                                  ${validationShake ? 'bg-red-500 text-white shake-error' : 'bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 border border-fuchsia-400/50 text-white hover:-translate-y-1 active:translate-y-1 active:scale-95'}
                             `}>
                                 <Icons.Gamepad2 className="w-5 h-5 md:w-6 md:h-6" />
                                 {startBtnText}
@@ -1281,7 +1273,6 @@
                             <div className="absolute top-0 left-0 right-0 h-3 md:h-4 bg-red-800 rounded-t-sm z-0"></div>
                             {dynamicKeys.map((k, index) => {
                                 const isMicHighlight = isMicActive && currentDetectedNote && currentDetectedNote.replace(/[0-9]/g, '') === k.name;
-                                
                                 return (
                                 <div key={k.pitch} className="relative flex pt-2 md:pt-3 flex-1 min-w-0">
                                     <button
